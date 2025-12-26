@@ -1,3 +1,4 @@
+```txt
 project/
 ├── data/                   # 数据相关
 │   ├── dataset.py
@@ -25,3 +26,4 @@ project/
 │
 ├── main.py                 # 入口脚本
 └── requirements.txt
+```
