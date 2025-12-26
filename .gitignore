@@ -1,0 +1,71 @@
+# =========================
+# Python / PyTorch 通用
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+venv/
+.env/
+.venv/
+
+# pip / setuptools
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+
+# =========================
+# PyTorch / 深度学习
+# =========================
+# 训练权重
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# 中间缓存
+runs/
+outputs/
+logs/
+checkpoints/
+wandb/
+
+# 数据集（一般不上传）
+data/
+datasets/
+*.zip
+*.tar
+*.tar.gz
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# 系统 & 编辑器
+# =========================
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+
+# =========================
+# 测试 & 覆盖率
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =========================
+# C/C++ 扩展（如 torch.utils.cpp_extension）
+# =========================
+build/
+*.so
+*.o
+*.a
