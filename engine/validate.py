@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import matplotlib as plt
+import matplotlib.pyplot as plt
 
 def evaluate(test_data, model):
     model.eval()
