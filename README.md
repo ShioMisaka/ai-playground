@@ -1,29 +1,35 @@
 ```txt
 project/
-├── data/                   # 数据相关
-│   ├── dataset.py
-│   └── dataloader.py
+├── datasets/               # 数据集存放位置
 │
 ├── models/                 # 模型结构
-│   ├── cnn.py
-│   └── yolov5.py
+│   │──__init__.py
+│   ├── bifpn_enhance.py
+│   ├── bifpn.py
+│   ├── cnn_t.py
+│   ├── conv.py
+│   └── mlp_t.py
 │
-├── engine/                 # ⭐ 训练 / 验证逻辑（推荐）
+├── engine/                 
+│   ├── __init__.py         # 训练 / 验证逻辑
 │   ├── train.py            # train_one_epoch
-│   ├── validate.py         # validate / evaluate
-│   └── __init__.py
+│   └── validate.py         # validate / evaluate
 │
-├── losses/                 # 损失函数
+├── losses/                 # 损失函数(还没写)
 │   └── loss.py
 │
 ├── utils/                  # 工具函数
-│   ├── metrics.py
-│   ├── logger.py
-│   └── checkpoint.py
+│   ├── metrics.py          # (还没写)
+│   ├── logger.py           # (还没写)
+│   ├── checkpoint.py       # (还没写)
+│   └── load.py             # 读取数据集
 │
-├── configs/                # 配置文件
+├── configs/                # 配置文件(还没写)
 │   └── train.yaml
 │
-├── main.py                 # 入口脚本
-└── requirements.txt
+├── BiFPN_test.ipynb        # BiFPN测试脚本
+├── fpn_test.py             # BiFPN测试
+├── mnist_demo.ipynb        # mnist测试脚本
+├── mnist_demo.py           # mnist测试脚本
+└── requirements.txt        # (还没写)
 ```
