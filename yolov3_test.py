@@ -17,7 +17,7 @@ def test01():
     else:
         print(f"Training outputs: {[o.shape for o in output]}")
 
-from utils.load_yolo_data import *
+from engine import train
 
 
 def test02():
@@ -29,7 +29,7 @@ def test02():
         model=model,
         config_path='datasets/MY_TEST_DATA/data.yaml',
         epochs=2,
-        batch_size=2,
+        batch_size=4,
         img_size=640,
         lr=0.01,
         device='cuda',
@@ -39,7 +39,4 @@ def test02():
 
 
 if __name__ == "__main__":
-    # test02()
-    model = YOLOv3(nc=2)
-    
-    print(model)
+    test02()
