@@ -25,6 +25,7 @@ pip-wheel-metadata/
 *.onnx
 
 # 中间缓存
+run/
 runs/
 outputs/
 logs/

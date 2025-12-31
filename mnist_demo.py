@@ -68,7 +68,7 @@ def test_model(model: nn.Module, test_data, test_size = 2):
 
     plt.show()
 
-from models.CNN_t import CNN_2Ct
+from models.cnn_t import CNN_2Ct
 
 if __name__ == "__main__":
     model = CNN_2Ct()
@@ -79,3 +79,5 @@ if __name__ == "__main__":
     train_model(model, train_datas, test_datas, epochs=2)
 
     test_model(model, test_datas, 2)
+
+
