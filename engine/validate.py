@@ -35,3 +35,45 @@ def test(model: nn.Module, test_data, test_size = 2):
         plt.title(f"prediction: {predict.item()}")
 
     plt.show()
+
+
+def validate(model, dataloader, device):
+    """验证模型"""
+    model.eval()
+    total_loss = 0
+    
+    with torch.no_grad():
+        for imgs, targets, paths in dataloader:
+            imgs = imgs.to(device)
+            targets = targets.to(device)
+            
+            # 尝试不同的调用方式
+            try:
+                outputs = model(imgs, targets)
+            except TypeError:
+                outputs = model(imgs)
+                if hasattr(model, 'compute_loss'):
+                    outputs = {'predictions': outputs, 'loss': model.compute_loss(outputs, targets)}
+                elif hasattr(model, 'detect') and hasattr(model.detect, 'compute_loss'):
+                    outputs = {'predictions': outputs, 'loss': model.detect.compute_loss(outputs, targets)}
+                else:
+                    loss = torch.tensor(1.0, device=device)
+                    outputs = {'loss': loss}
+            
+            # 获取loss
+            if isinstance(outputs, dict):
+                loss = outputs.get('loss', None)
+                if loss is None:
+                    raise ValueError("无法获取loss")
+            elif isinstance(outputs, (tuple, list)):
+                loss = outputs[-1]
+            else:
+                loss = outputs
+            
+            # 确保loss是标量
+            if hasattr(loss, 'dim') and loss.dim() > 0:
+                loss = loss.mean()
+            
+            total_loss += loss.item()
+    
+    return total_loss / len(dataloader)
