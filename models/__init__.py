@@ -3,6 +3,8 @@ from .bifpn import (
     BiFPN_Cat
     )
 
+from .att import CoordAtt
+
 from .block import Bottleneck
 from .conv import Conv
 
