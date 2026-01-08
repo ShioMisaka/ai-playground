@@ -1,48 +1,54 @@
 import torch
 import torch.nn as nn
-# 假设你在 ultralytics/nn/modules/block.py 中编写，可以直接引入 Conv
 from .conv import Conv 
 
 class CoordAtt(nn.Module):
-    def __init__(self, inp, oup, reduction=32):
+    def __init__(self, inp: int, oup: int, reduction: int = 32):
         """
-        使用 Ultralytics Conv 组件实现的 Coordinate Attention
+        Coordinate Attention 模块 (标准版)
         :param inp: 输入通道数
         :param oup: 输出通道数
-        :param reduction: 缩减比例
+        :param reduction: 缩减比例，用于构建 Bottleneck 结构
         """
         super().__init__()
-        # 1. 空间池化层 (无需 Conv)
+        # 1. 空间池化：分别聚合水平和垂直信息
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
 
+        # 计算中间层的压缩通道数 (Bottleneck)
         mip = max(8, inp // reduction)
 
-        # 2. 核心变换层：使用 Ultralytics 的 Conv
-        # 默认 act=True 对应 SiLU，自动包含 Conv+BN+SiLU
+        # 2. 核心融合层：将 H 和 W 信息拼接后进行通道压缩和非线性激活
+        # 这里使用 Ultralytics 的 Conv，默认包含 BatchNorm2d 和 SiLU
         self.cv1 = Conv(inp, mip, k=1, s=1, p=0) 
 
-        # 3. 输出层：通常最后一步不需要激活函数，或者是 Sigmoid
-        # 这里我们手动处理 Sigmoid，所以 Conv 设置 act=False
+        # 3. 恢复层：将压缩的通道 mip 恢复到输出通道 oup
+        # 注意：这里不需要 SiLU，后面手动跟 Sigmoid
         self.cv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
         self.cv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
         
-    def forward(self, x):
+        # 4. 如果输入输出通道不一致，需要一个 shortcut 变换（可选，通常 YOLO 内部一致）
+        self.identity = nn.Conv2d(inp, oup, 1) if inp != oup else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         n, c, h, w = x.size()
         
-        # 信息嵌入 (H, W 维度聚合)
-        x_h = self.pool_h(x)
-        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+        # --- 信息嵌入 (Embedding) ---
+        x_h = self.pool_h(x) # [N, C, H, 1]
+        x_w = self.pool_w(x).permute(0, 1, 3, 2) # [N, C, 1, W] -> [N, C, W, 1]
 
-        # 拼接与融合 (利用 Ultralytics Conv 的 SiLU 激活)
-        y = self.cv1(torch.cat([x_h, x_w], dim=2))
+        # --- 协同注意力生成 (Generation) ---
+        # 拼接后的尺寸: [N, C, H+W, 1]
+        y = self.cv1(torch.cat([x_h, x_w], dim=2)) # 压缩到 [N, mip, H+W, 1]
         
-        # 拆分
-        x_h, x_w = torch.split(y, [h, w], dim=2)
-        x_w = x_w.permute(0, 1, 3, 2)
+        # 拆分回两个方向
+        x_h, x_w = torch.split(y, [h, w], dim=2) # 分别为 [N, mip, H, 1] 和 [N, mip, W, 1]
+        x_w = x_w.permute(0, 1, 3, 2) # 转回 [N, mip, 1, W]
 
-        # 加权输出
-        a_h = self.cv_h(x_h).sigmoid()
-        a_w = self.cv_w(x_w).sigmoid()
+        # 生成 H 和 W 方向的权重 (Sigmoid 激活)
+        a_h = self.cv_h(x_h).sigmoid() # [N, oup, H, 1]
+        a_w = self.cv_w(x_w).sigmoid() # [N, oup, 1, W]
 
-        return x * a_h * a_w
+        # --- 重加权 (Reweight) ---
+        # 如果 inp != oup，先转换 x，否则直接相乘
+        return self.identity(x) * a_h * a_w

@@ -14,11 +14,18 @@ import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
+from datetime import datetime
 
 # 添加父目录到路径以导入 models
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import CoordAtt, Conv
+
+# 创建带时间戳的输出目录
+TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+OUTPUT_DIR = os.path.join('outputs', f'attention_vis_{TIMESTAMP}')
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+print(f"输出目录: {OUTPUT_DIR}")
 
 
 class CoordAttWithVisualization(CoordAtt):
@@ -490,7 +497,7 @@ if __name__ == '__main__':
     print("训练前注意力可视化 (随机初始化):")
     print("=" * 50)
     visualize_trained_attention_multi_layer(model, val_loader, device,
-                                             save_path='outputs/attention_before_training.png')
+                                             save_path=os.path.join(OUTPUT_DIR, 'attention_before_training.png'))
 
     # 训练模型
     train_model(model, train_loader, val_loader, epochs=epochs, lr=lr, device=device)
@@ -500,6 +507,6 @@ if __name__ == '__main__':
     print("训练后注意力可视化 (已学习):")
     print("=" * 50)
     visualize_trained_attention_multi_layer(model, val_loader, device,
-                                             save_path='outputs/attention_after_training.png')
+                                             save_path=os.path.join(OUTPUT_DIR, 'attention_after_training.png'))
 
     print("\n完成!")
