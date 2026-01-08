@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AI Playground - a PyTorch-based computer vision research project focused on:
 - **YOLOv3** object detection implementation
+- **Coordinate Attention for Object Detection** - Integrating CoordAtt into YOLO for better bounding box regression
 - **BiFPN** (Bidirectional Feature Pyramid Network) with learnable fusion weights
-- **Coordinate Attention** mechanisms
 - Custom YOLO-format dataset training
+
+**Key Design**: The Coordinate Attention mechanism helps the detection network better regress to target objects by capturing long-range spatial dependencies along horizontal and vertical directions.
 
 ## Environment
 
@@ -46,11 +48,15 @@ python visualization/visualize_trained_coordatt.py  # Train model, then visualiz
 
 **Core modules:**
 - `yolov3.py` - Complete YOLOv3 with Darknet-53 backbone
+- `att.py` - `CoordAtt` coordinate attention module, `CoordAttWithVisualization`, and `YOLOCoordAttDetector`
+  - `YOLOCoordAttDetector`: YOLO detector with 4 CoordAtt layers in backbone at strides 4/8/16/32
+  - Uses FPN neck for multi-scale feature fusion
+  - Detect head outputs at 3 scales (stride 8/16/32) for object detection
 - `bifpn.py` - `BiFPN_Cat` class for multi-scale feature fusion with learnable weights
-- `att.py` - `CoordAtt` coordinate attention module
 - `conv.py` - `Conv` wrapper (Conv2d + BatchNorm + SiLU activation)
 - `block.py` - `Bottleneck` building block
-- `head.py` - Detection head for YOLO
+- `head.py` - `Detect` detection head for YOLO (used by YOLOCoordAttDetector)
+- `yolo_loss.py` - YOLO loss function (box, objectness, class losses)
 
 **When adding new models:** Export in `models/__init__.py` following the pattern:
 ```python
@@ -59,8 +65,17 @@ from .your_module import YourClass
 
 ### engine/ - Training Logic
 
-- `train.py` - `train_one_epoch()` function
-- `validate.py` - `validate()` and `evaluate()` functions
+- `train.py` - Generic `train()` function for classification
+- `validate.py` - `validate()` and `evaluate()` functions for classification
+- `detector.py` - **YOLO detection training** (`train_one_epoch()`, `validate()`, `train_detector()`)
+  - Handles training/validation mode switching for Detect head
+  - Supports warmup + cosine annealing learning rate schedule
+  - Early stopping with patience
+  - Saves best model and training history to JSON
+- `visualize.py` - **Attention visualization for detection**
+  - `visualize_detection_attention()` - Visualize attention maps with detection boxes
+  - `visualize_attention_comparison()` - Compare attention across multiple CoordAtt layers
+  - `enhance_contrast()` - Image enhancement utilities
 
 ### utils/ - Data Loading
 
@@ -96,10 +111,52 @@ out = bifpn([feat1, feat2, feat3])  # Shape: (1, 512, 40, 40)
 
 ### Coordinate Attention
 
+**Basic CoordAtt module:**
 ```python
 from models import CoordAtt
 att = CoordAtt(inp=256, oup=256, reduction=32)
 out = att(x)  # Same shape as input, attention-weighted
+```
+
+**YOLO + CoordAtt Detector (for object detection):**
+```python
+from models import YOLOCoordAttDetector
+from engine import train_detector, visualize_detection_attention
+from utils import create_dataloaders
+
+# Create model with CoordAtt-enhanced backbone
+model = YOLOCoordAttDetector(nc=1)  # nc = number of classes
+
+# Train the detector
+train_loader, val_loader, _ = create_dataloaders(config_path, batch_size=4, img_size=640)
+train_detector(model, train_loader, val_loader, epochs=100, lr=0.001, device='cuda')
+
+# Visualize attention after training
+visualize_detection_attention(model, val_loader, device, save_path='attention.png')
+```
+
+## Important Implementation Notes
+
+### Detection Training Mode Handling
+
+When using YOLO's `Detect` head, it returns different formats based on training mode:
+- **Training mode** (`model.training=True`): Returns list of predictions for loss computation
+- **Inference mode** (`model.eval()`): Returns tuple `(concatenated, list)` for NMS/post-processing
+
+**Important**: The `engine/detector.py` `validate()` function temporarily sets `model.detect.train()` during validation to ensure loss computation works correctly, while keeping other layers (BatchNorm, Dropout) in eval mode.
+
+### Stride Alignment
+
+The `YOLOCoordAttDetector` backbone produces feature maps at strides 4/8/16/32, but the Detect head expects inputs at strides 8/16/32. Therefore:
+- Use `p4` (stride 8), `p5` (stride 16), `p6_backbone` (stride 32) for detection
+- The FPN neck fuses features but maintains correct stride alignment
+
+### JSON Serialization
+
+When saving training history to JSON, always convert PyTorch types to Python native types:
+```python
+history['train_loss'].append(float(train_loss))  # Not train_loss.item()
+history['lr'].append(float(optimizer.param_groups[0]['lr']))
 ```
 
 ## Testing New Components
