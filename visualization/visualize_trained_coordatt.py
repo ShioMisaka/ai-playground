@@ -28,8 +28,8 @@ if __name__ == '__main__':
     # 配置
     config_path = 'datasets/MY_TEST_DATA/data.yaml'
     img_size = 640
-    batch_size = 1
-    epochs = 2  # 测试用，少量 epochs
+    batch_size = 8
+    epochs = 25  # 测试用，少量 epochs
     lr = 0.001
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
