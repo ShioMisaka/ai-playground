@@ -20,6 +20,7 @@ from .visualize import (
     visualize_single_image_attention,
     visualize_multiple_images_attention,
     # 模型对比可视化
+    visualize_single_model_attention,
     visualize_model_comparison,
     visualize_cross_attention_matrix,
     visualize_training_progress,
@@ -59,6 +60,7 @@ __all__ = [
     'visualize_multiple_images_attention',
 
     # 可视化 - 模型对比
+    'visualize_single_model_attention',
     'visualize_model_comparison',
     'visualize_cross_attention_matrix',
     'visualize_training_progress',

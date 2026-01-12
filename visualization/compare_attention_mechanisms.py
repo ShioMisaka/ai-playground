@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import YOLOCoordAttDetector, YOLOCoordCrossAttDetector
 from engine import (train_and_compare_models, print_comparison_results,
-                    visualize_model_comparison, visualize_cross_attention_matrix,
-                    visualize_training_progress)
+                    visualize_single_model_attention, visualize_model_comparison,
+                    visualize_cross_attention_matrix, visualize_training_progress)
 from utils import create_dataloaders
 from utils.load import load_yaml_config
 
@@ -82,7 +82,24 @@ def main():
     coordatt_model = results['CoordAtt']['model']
     crossatt_model = results['CoordCrossAtt']['model']
 
-    # 模型注意力对比
+    # ========== 单个模型详细可视化 ==========
+    print("\n--- 生成 CoordAtt 独立可视化 ---")
+    visualize_single_model_attention(
+        coordatt_model, 'CoordAtt (Coordinate Attention)',
+        val_loader, device,
+        save_path=str(output_dir / 'coordatt_detail.png'),
+        img_size=img_size
+    )
+
+    print("\n--- 生成 CoordCrossAtt 独立可视化 ---")
+    visualize_single_model_attention(
+        crossatt_model, 'CoordCrossAtt (Coordinate Cross Attention)',
+        val_loader, device,
+        save_path=str(output_dir / 'crossatt_detail.png'),
+        img_size=img_size
+    )
+
+    # ========== 模型对比可视化 ==========
     visualize_model_comparison(
         coordatt_model, crossatt_model, val_loader, device,
         save_path=str(output_dir / 'attention_comparison.png'),
@@ -106,8 +123,16 @@ def main():
         save_path=str(output_dir / 'training_progress.png')
     )
 
-    print(f"\n所有输出已保存到: {output_dir}")
-    print("完成!")
+    print(f"\n{'=' * 60}")
+    print(f"所有输出已保存到: {output_dir}")
+    print(f"{'=' * 60}")
+    print("\n生成的可视化文件:")
+    print("  - coordatt_detail_sample*.png      CoordAtt 各样本注意力详情")
+    print("  - crossatt_detail_sample*.png      CoordCrossAtt 各样本注意力详情")
+    print("  - attention_comparison.png         两种注意力机制对比")
+    print("  - cross_attention_matrix.png       Cross-Attention 相关性矩阵")
+    print("  - training_progress.png            训练进度对比")
+    print("\n完成!")
 
 
 if __name__ == '__main__':

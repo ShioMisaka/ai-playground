@@ -406,6 +406,113 @@ def visualize_multiple_images_attention(model, image_dir, num_samples=4,
 
 # ==================== 模型对比可视化 ====================
 
+def visualize_single_model_attention(model, model_name, val_loader, device,
+                                     save_path='single_model_attention.png', img_size=256):
+    """
+    可视化单个模型的注意力效果（原图+注意力+叠加+各层注意力）
+
+    Args:
+        model: 带注意力机制的模型
+        model_name: 模型名称（用于标题）
+        val_loader: 验证数据加载器
+        device: 设备
+        save_path: 保存路径
+        img_size: 图像大小
+    """
+    print(f"\n生成 {model_name} 注意力可视化...")
+
+    # 获取样本图片
+    samples = []
+    for imgs, targets, paths in val_loader:
+        for i in range(min(4, len(imgs))):
+            samples.append((imgs[i], targets[targets[:, 0] == i], paths[i]))
+        if len(samples) >= 4:
+            break
+
+    # 检查模型类型
+    is_crossatt = hasattr(model, 'coord_att_layers') and 'Cross' in type(model).__name__
+
+    # 获取注意力层数量
+    num_layers = len(model.coord_att_layers) if hasattr(model, 'coord_att_layers') else 4
+
+    # 为每张样本创建一个图，每张图展示原图+注意力+各层注意力
+    for sample_idx, (img, target, path) in enumerate(samples):
+        img_input = img.unsqueeze(0).to(device)
+        img_display = img.permute(1, 2, 0).numpy()
+
+        # 创建子图：原图 + 注意力 + 叠加 + 各层注意力
+        num_cols = 3 + min(3, num_layers)  # 原图、注意力、叠加、最多3层
+        fig, axes = plt.subplots(1, num_cols, figsize=(4 * num_cols, 4))
+
+        # 1. 原图 + GT 框
+        axes[0].imshow(img_display)
+        if target.shape[0] > 0:
+            for t in target:
+                x, y, w, h = t[2:].cpu().numpy()
+                x1 = (x - w/2) * img_size
+                y1 = (y - h/2) * img_size
+                rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
+                                         linewidth=2, edgecolor='green', facecolor='none')
+                axes[0].add_patch(rect)
+        axes[0].set_title('Original + GT', fontsize=12, fontweight='bold')
+        axes[0].axis('off')
+
+        # 2. 主要注意力热力图（使用 Layer 0）
+        layer_idx = 0
+        if is_crossatt:
+            att, _ = get_crossatt_attention(model, img_input, layer_idx)
+        else:
+            att = get_coordatt_attention(model, img_input, layer_idx)
+
+        att_resized = np.array(Image.fromarray((att * 255).astype(np.uint8)).resize(
+            (img_size, img_size), Image.BILINEAR)) / 255.0
+        att_enhanced = enhance_contrast(att_resized)
+
+        axes[1].imshow(att_enhanced, cmap='inferno', vmin=0, vmax=1)
+        axes[1].set_title(f'Attention Heatmap\n(Layer 1)', fontsize=12, fontweight='bold')
+        axes[1].axis('off')
+
+        # 3. 叠加显示
+        axes[2].imshow(img_display)
+        axes[2].imshow(att_enhanced, cmap='inferno', alpha=0.5)
+        if target.shape[0] > 0:
+            for t in target:
+                x, y, w, h = t[2:].cpu().numpy()
+                x1 = (x - w/2) * img_size
+                y1 = (y - h/2) * img_size
+                rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
+                                         linewidth=2, edgecolor='green', facecolor='none')
+                axes[2].add_patch(rect)
+        axes[2].set_title('Attention Overlay', fontsize=12, fontweight='bold')
+        axes[2].axis('off')
+
+        # 4. 各层注意力对比
+        for layer_i in range(min(3, num_layers)):
+            if is_crossatt:
+                layer_att, _ = get_crossatt_attention(model, img_input, layer_i)
+            else:
+                layer_att = get_coordatt_attention(model, img_input, layer_i)
+
+            layer_att_resized = np.array(Image.fromarray((layer_att * 255).astype(np.uint8)).resize(
+                (img_size, img_size), Image.BILINEAR)) / 255.0
+            layer_att_enhanced = enhance_contrast(layer_att_resized)
+
+            axes[3 + layer_i].imshow(layer_att_enhanced, cmap='inferno', vmin=0, vmax=1)
+            axes[3 + layer_i].set_title(f'Layer {layer_i + 1}', fontsize=11)
+            axes[3 + layer_i].axis('off')
+
+        plt.suptitle(f'{model_name} - Sample {sample_idx + 1}', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+
+        # 保存每张样本的图
+        base_path = save_path.rsplit('.', 1)[0]
+        sample_save_path = f"{base_path}_sample{sample_idx + 1}.png"
+        plt.savefig(sample_save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+
+    print(f"{model_name} 注意力可视化已保存到: {save_path.replace('.png', '')}_sample*.png")
+
+
 def visualize_model_comparison(coordatt_model, crossatt_model, val_loader, device,
                                 save_path='model_comparison.png', img_size=256):
     """
