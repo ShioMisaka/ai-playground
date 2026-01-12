@@ -1,7 +1,7 @@
 """
-Coordinate Attention YOLO 训练与可视化脚本 (目标检测版本)
+YOLO + CoordAtt 训练脚本
 
-使用 engine 模块进行 YOLO 检测训练和注意力可视化
+训练带有 Coordinate Attention 的 YOLO 检测器并可视化注意力效果
 """
 import os
 import sys
@@ -9,7 +9,7 @@ import torch
 from pathlib import Path
 from datetime import datetime
 
-# 添加父目录到路径以导入 models 和 engine
+# 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import YOLOCoordAttDetector
@@ -17,21 +17,21 @@ from engine import train_detector, visualize_detection_attention, visualize_atte
 from utils import create_dataloaders
 from utils.load import load_yaml_config
 
-# 创建带时间戳的输出目录
-TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_DIR = os.path.join('outputs', f'yolo_coordatt_{TIMESTAMP}')
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-print(f"输出目录: {OUTPUT_DIR}")
 
-
-if __name__ == '__main__':
+def main():
     # 配置
     config_path = 'datasets/MY_TEST_DATA/data.yaml'
     img_size = 640
     batch_size = 8
-    epochs = 25  # 测试用，少量 epochs
+    epochs = 25
     lr = 0.001
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # 创建输出目录
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = Path('outputs') / f'yolo_coordatt_{timestamp}'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"输出目录: {output_dir}")
 
     print(f"使用设备: {device}")
 
@@ -59,27 +59,32 @@ if __name__ == '__main__':
     print(f"总参数量: {total_params:,}")
     print(f"可训练参数量: {trainable_params:,}")
 
-    # 训练模型 (使用 engine.detector.train_detector)
+    # 训练模型
     train_detector(model, train_loader, val_loader,
                    epochs=epochs, lr=lr, device=device,
-                   save_dir=OUTPUT_DIR, patience=15)
+                   save_dir=str(output_dir), patience=15)
 
     # 训练后可视化
     print("\n" + "=" * 50)
-    print("训练后注意力可视化 (已学习):")
+    print("训练后注意力可视化:")
     print("=" * 50)
 
     visualize_detection_attention(
         model, val_loader, device,
-        save_path=os.path.join(OUTPUT_DIR, 'detection_attention.png'),
+        save_path=str(output_dir / 'detection_attention.png'),
         img_size=img_size
     )
 
     # 创建对比图
     visualize_attention_comparison(
         model, val_loader, device,
-        save_path=os.path.join(OUTPUT_DIR, 'attention_comparison.png'),
+        save_path=str(output_dir / 'attention_comparison.png'),
         img_size=img_size
     )
 
-    print("\n完成!")
+    print(f"\n所有输出已保存到: {output_dir}")
+    print("完成!")
+
+
+if __name__ == '__main__':
+    main()

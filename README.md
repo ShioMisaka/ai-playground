@@ -7,44 +7,18 @@
 本项目实现了多个经典的深度学习模型，特别关注：
 
 - **YOLOv3** - 完整的目标检测系统
+- **Coordinate Attention (CoordAtt)** - 坐标注意力机制
+- **Coordinate Cross Attention (CoordCrossAtt)** - 坐标交叉注意力机制
 - **BiFPN** - 双向特征金字塔网络，支持多尺度特征融合
-- **Coordinate Attention** - 坐标注意力机制，带完整可视化
 
-## 特性
-
-- 模块化的神经网络组件设计
-- 完整的训练和验证流程
-- YOLO 格式数据集支持
-- 注意力机制可视化工具
-- 支持自定义目标检测任务
-
-## 项目结构
-
-```
-ai-playground/
-├── models/              # 神经网络组件
-│   ├── yolov3.py       # YOLOv3 目标检测
-│   ├── bifpn.py        # BiFPN 特征融合
-│   ├── att.py          # Coordinate Attention
-│   ├── conv.py         # 自定义卷积层 (Conv+BN+SiLU)
-│   └── block.py        # 基础模块
-├── engine/             # 训练和验证逻辑
-├── utils/              # 数据加载工具
-├── tests/              # 单元测试
-├── demos/              # 演示脚本
-├── visualization/      # 可视化工具
-├── datasets/           # 数据集存储
-└── outputs/            # 输出结果
-```
-
-## 快速开始
-
-### 环境要求
+## 环境要求
 
 ```bash
 # 激活 conda 环境
 conda activate torch_cpu
 ```
+
+## 快速开始
 
 ### 运行测试
 
@@ -56,36 +30,109 @@ python tests/fpn_test.py
 python tests/att_test.py
 ```
 
-### 运行演示
+### 训练和可视化
+
+#### 1. 训练 YOLO + CoordAtt 检测器
 
 ```bash
-# MNIST 分类演示
-python demos/mnist_demo.py
-
-# YOLOv3 目标检测训练
-python demos/yolov3_demo.py
+python visualization/visualize_trained_coordatt.py
 ```
 
-### 注意力可视化
+训练完成后会在 `outputs/yolo_coordatt_<timestamp>/` 生成：
+- `best_model.pth` - 最佳模型权重
+- `training_history.json` - 训练历史记录
+- `detection_attention.png` - 检测注意力可视化
+- `attention_comparison.png` - 训练前后注意力对比
+
+#### 2. 对比 CoordAtt vs CoordCrossAtt
 
 ```bash
-# 训练模型并可视化注意力效果
-python visualization/visualize_trained_coordatt.py
+python visualization/compare_attention_mechanisms.py
+```
+
+对比训练会在 `outputs/attention_comparison/run_<timestamp>/` 生成：
+- `coordatt/` 和 `crossatt/` - 两个模型的训练结果
+- `attention_comparison.png` - 注意力对比图
+- `cross_attention_matrix.png` - Cross-Attention 相关性矩阵
+- `training_progress.png` - 训练进度对比
+
+#### 3. 测试已训练模型（不进行训练）
+
+```bash
+# 测试完整数据集
+python scripts/test_attention.py \
+    --model outputs/yolo_coordatt_xxx/best_model.pth \
+    --config datasets/MY_TEST_DATA/data.yaml \
+    --output outputs/test_results
+
+# 测试单张图像
+python scripts/test_attention.py \
+    --model outputs/yolo_coordatt_xxx/best_model.pth \
+    --image datasets/MY_TEST_DATA/images/test/circle_0001.jpg \
+    --output outputs/test_results
+```
+
+#### 4. 可视化未训练的注意力
+
+```bash
+# 查看 CoordAtt 在随机初始化时的注意力分布
+python visualization/visualize_coordatt.py
+```
+
+## 项目结构
+
+```
+ai-playground/
+├── models/                 # 神经网络组件
+│   ├── att.py              # 基础注意力模块 (CoordAtt, CoordCrossAtt)
+│   ├── att_visualize.py    # 带可视化功能的注意力模块
+│   ├── yolo_att.py         # YOLO + Attention 检测器
+│   ├── yolov3.py           # YOLOv3 目标检测
+│   ├── bifpn.py            # BiFPN 特征融合
+│   ├── conv.py             # 自定义卷积层 (Conv+BN+SiLU)
+│   └── ...
+├── engine/                 # 训练和可视化引擎
+│   ├── detector.py         # YOLO 检测训练
+│   ├── visualize.py        # 注意力可视化函数
+│   └── comparison.py       # 模型对比训练
+├── utils/                  # 数据加载工具
+├── tests/                  # 单元测试
+├── visualization/          # 训练入口脚本
+├── scripts/                # 测试脚本
+├── datasets/               # 数据集存储
+└── outputs/                # 输出结果
 ```
 
 ## 核心模型
 
-### YOLOv3
+### YOLO + CoordAtt 检测器
 
-完整的目标检测实现，包含：
-- Darknet-53 骨干网络
-- 多尺度检测 (P3/P4/P5)
-- 自定义锚框生成
-- YOLO 损失函数
+```python
+from models import YOLOCoordAttDetector
+from engine import train_detector, visualize_detection_attention
+from utils import create_dataloaders
 
-### BiFPN
+# 创建模型
+model = YOLOCoordAttDetector(nc=2)  # 2 个类别
 
-支持多通道特征融合的特征金字塔网络：
+# 训练
+train_loader, val_loader, _ = create_dataloaders('datasets/MY_TEST_DATA/data.yaml')
+train_detector(model, train_loader, val_loader, epochs=100, lr=0.001, device='cuda')
+
+# 可视化
+visualize_detection_attention(model, val_loader, device, save_path='attention.png')
+```
+
+### YOLO + CoordCrossAtt 检测器
+
+```python
+from models import YOLOCoordCrossAttDetector
+
+# 创建模型 (num_heads 控制多头注意力的头数)
+model = YOLOCoordCrossAttDetector(nc=2, num_heads=1)
+```
+
+### BiFPN 多尺度特征融合
 
 ```python
 from models import BiFPN_Cat
@@ -98,26 +145,6 @@ feat3 = torch.randn(1, 512, 40, 40)
 bifpn = BiFPN_Cat(c1=[128, 256, 512])
 out = bifpn([feat1, feat2, feat3])  # 输出: (1, 512, 40, 40)
 ```
-
-### Coordinate Attention
-
-坐标注意力机制，带完整可视化工具：
-
-```python
-from models import CoordAtt
-
-# 创建注意力模块
-att = CoordAtt(inp=256, oup=256, reduction=32)
-out = att(x)  # 输出尺寸与输入相同，应用注意力权重
-```
-
-## 可视化效果
-
-使用 4 层堆叠的 CoordAtt，展示训练前后注意力的变化：
-
-![Attention Visualization](outputs/attention_after_training_comparison.png)
-
-训练后，模型学会关注形状的关键特征区域。
 
 ## 数据集格式
 
@@ -136,16 +163,38 @@ datasets/MY_TEST_DATA/
 └── data.yaml          # 数据集配置
 ```
 
+`data.yaml` 格式：
+```yaml
+path: /path/to/datasets/MY_TEST_DATA/
+train: images/train
+val: images/val
+test: images/test
+
+nc: 2  # 类别数
+names:
+  0: circle
+  1: square
+```
+
 ## 开发状态
 
 | 模块 | 状态 |
 |------|------|
 | YOLOv3 | ✅ 完成 |
 | BiFPN | ✅ 完成 |
-| Coordinate Attention | ✅ 完成 |
+| CoordAtt | ✅ 完成 |
+| CoordCrossAtt | ✅ 完成 |
 | 训练引擎 | ✅ 完成 |
-| 数据加载 | ✅ 完成 |
 | 可视化工具 | ✅ 完成 |
+| 模型对比 | ✅ 完成 |
+
+## 可视化效果
+
+训练后，模型学会关注形状的关键特征区域：
+
+- **检测注意力** - 显示模型在检测时关注的位置
+- **注意力对比** - 对比 CoordAtt 和 CoordCrossAtt 的注意力分布
+- **相关性矩阵** - 展示水平和垂直位置之间的关联
 
 ## 许可证
 

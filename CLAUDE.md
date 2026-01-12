@@ -6,11 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AI Playground - a PyTorch-based computer vision research project focused on:
 - **YOLOv3** object detection implementation
-- **Coordinate Attention for Object Detection** - Integrating CoordAtt into YOLO for better bounding box regression
-- **BiFPN** (Bidirectional Feature Pyramid Network) with learnable fusion weights
+- **Coordinate Attention (CoordAtt)** - Captures long-range spatial dependencies along horizontal and vertical directions
+- **Coordinate Cross Attention (CoordCrossAtt)** - Cross-attention mechanism for H-W feature interaction
+- **BiFPN** with learnable fusion weights
 - Custom YOLO-format dataset training
-
-**Key Design**: The Coordinate Attention mechanism helps the detection network better regress to target objects by capturing long-range spatial dependencies along horizontal and vertical directions.
 
 ## Environment
 
@@ -20,73 +19,103 @@ eval "$(conda shell.bash hook)"
 conda activate torch_cpu
 ```
 
-## Running Tests
+## Running Scripts
 
-**Unit tests** (in `tests/`):
+### Training + Visualization
+
+```bash
+# Train YOLO + CoordAtt detector
+python visualization/visualize_trained_coordatt.py
+
+# Compare CoordAtt vs CoordCrossAtt
+python visualization/compare_attention_mechanisms.py
+```
+
+### Testing (No Training)
+
+```bash
+# Test trained model on dataset
+python scripts/test_attention.py --model outputs/best_model.pth --config datasets/MY_TEST_DATA/data.yaml
+
+# Test on single image
+python scripts/test_attention.py --model outputs/best_model.pth --image test.jpg
+```
+
+### Unit Tests
+
 ```bash
 python tests/fpn_test.py    # Test BiFPN module
-python tests/att_test.py    # Test Coordinate Attention module
+python tests/att_test.py    # Test Attention modules
 ```
 
-**Demos** (in `demos/`):
+### Visualization Only (Untrained)
+
 ```bash
-python demos/mnist_demo.py     # Train CNN on MNIST
-python demos/yolov3_demo.py    # Train YOLOv3 on custom dataset
+python visualization/visualize_coordatt.py
 ```
-
-**Visualization** (in `visualization/`):
-```bash
-python visualization/visualize_coordatt.py          # Visualize attention (untrained)
-python visualization/visualize_trained_coordatt.py  # Train model, then visualize attention
-```
-
-**Output files** are saved in `outputs/` directory.
 
 ## Architecture
 
 ### models/ - Neural Network Components
 
-**Core modules:**
+**File organization (refactored):**
+- `att.py` - Base attention modules: `CoordAtt`, `CoordCrossAtt`
+- `att_visualize.py` - Attention with visualization hooks: `CoordAttWithVisualization`, `CoordCrossAttWithVisualization`
+- `yolo_att.py` - YOLO detectors: `YOLOCoordAttDetector`, `YOLOCoordCrossAttDetector`
 - `yolov3.py` - Complete YOLOv3 with Darknet-53 backbone
-- `att.py` - `CoordAtt` coordinate attention module, `CoordAttWithVisualization`, and `YOLOCoordAttDetector`
-  - `YOLOCoordAttDetector`: YOLO detector with 4 CoordAtt layers in backbone at strides 4/8/16/32
-  - Uses FPN neck for multi-scale feature fusion
-  - Detect head outputs at 3 scales (stride 8/16/32) for object detection
-- `bifpn.py` - `BiFPN_Cat` class for multi-scale feature fusion with learnable weights
-- `conv.py` - `Conv` wrapper (Conv2d + BatchNorm + SiLU activation)
-- `block.py` - `Bottleneck` building block
-- `head.py` - `Detect` detection head for YOLO (used by YOLOCoordAttDetector)
-- `yolo_loss.py` - YOLO loss function (box, objectness, class losses)
+- `bifpn.py` - `BiFPN_Cat` for multi-scale feature fusion
+- `conv.py` - `Conv` wrapper (Conv2d + BatchNorm + SiLU)
+- `head.py` - `Detect` detection head for YOLO
+- `yolo_loss.py` - YOLO loss function
 
-**When adding new models:** Export in `models/__init__.py` following the pattern:
+**Export in `models/__init__.py`:**
 ```python
-from .your_module import YourClass
+from .att import CoordAtt, CoordCrossAtt
+from .att_visualize import CoordAttWithVisualization, CoordCrossAttWithVisualization
+from .yolo_att import YOLOCoordAttDetector, YOLOCoordCrossAttDetector
 ```
 
-### engine/ - Training Logic
+### engine/ - Training and Visualization Engine
 
-- `train.py` - Generic `train()` function for classification
-- `validate.py` - `validate()` and `evaluate()` functions for classification
-- `detector.py` - **YOLO detection training** (`train_one_epoch()`, `validate()`, `train_detector()`)
-  - Handles training/validation mode switching for Detect head
-  - Supports warmup + cosine annealing learning rate schedule
-  - Early stopping with patience
-  - Saves best model and training history to JSON
-- `visualize.py` - **Attention visualization for detection**
-  - `visualize_detection_attention()` - Visualize attention maps with detection boxes
-  - `visualize_attention_comparison()` - Compare attention across multiple CoordAtt layers
-  - `enhance_contrast()` - Image enhancement utilities
+**Core modules:**
+- `detector.py` - YOLO detection training (`train_detector()`, `train_one_epoch()`, `validate()`)
+- `visualize.py` - All visualization functions
+- `comparison.py` - Model comparison training (`train_and_compare_models()`, `print_comparison_results()`)
 
-### utils/ - Data Loading
+**Visualization functions (all in `engine/visualize.py`):**
+```python
+# Basic tools
+load_image()                    # Load and preprocess image
+enhance_contrast()               # Enhance attention map contrast
+get_coordatt_attention()        # Get CoordAtt attention map
+get_crossatt_attention()        # Get CoordCrossAtt attention map
 
-- `load.py` - `get_yolo_dataset()` for YOLO-format datasets, supports MNIST
+# Detection task
+visualize_detection_attention()       # Detection attention with boxes
+visualize_attention_comparison()       # Before/after training comparison
 
-### Dataset Format
+# Single/Multiple images
+visualize_single_image_attention()     # Single image attention
+visualize_multiple_images_attention()  # Multiple images attention
 
-Custom YOLO dataset in `datasets/MY_TEST_DATA/`:
-- `images/` - train/val/test splits
-- `labels/` - YOLO format .txt annotations (class x_center y_center width height, normalized)
-- `data.yaml` - dataset configuration
+# Model comparison
+visualize_model_comparison()           # Compare CoordAtt vs CoordCrossAtt
+visualize_cross_attention_matrix()     # Cross-Attention correlation matrix
+visualize_training_progress()           # Training progress comparison
+```
+
+### Directory Structure
+
+```
+models/         # Neural network components
+engine/         # Training and visualization engine
+utils/          # Data loading utilities
+tests/          # Unit tests for individual modules
+visualization/  # Training entry scripts
+scripts/        # Testing scripts (no training)
+datasets/       # YOLO-format datasets
+outputs/        # Generated outputs (models, images, logs)
+```
 
 ## Code Patterns
 
@@ -109,23 +138,23 @@ bifpn = BiFPN_Cat(c1=[128, 256, 512])
 out = bifpn([feat1, feat2, feat3])  # Shape: (1, 512, 40, 40)
 ```
 
-### Coordinate Attention
+### Coordinate Attention (Basic)
 
-**Basic CoordAtt module:**
 ```python
 from models import CoordAtt
 att = CoordAtt(inp=256, oup=256, reduction=32)
 out = att(x)  # Same shape as input, attention-weighted
 ```
 
-**YOLO + CoordAtt Detector (for object detection):**
+### YOLO + CoordAtt Detector (For Object Detection)
+
 ```python
 from models import YOLOCoordAttDetector
 from engine import train_detector, visualize_detection_attention
 from utils import create_dataloaders
 
 # Create model with CoordAtt-enhanced backbone
-model = YOLOCoordAttDetector(nc=1)  # nc = number of classes
+model = YOLOCoordAttDetector(nc=2)  # nc = number of classes
 
 # Train the detector
 train_loader, val_loader, _ = create_dataloaders(config_path, batch_size=4, img_size=640)
@@ -133,6 +162,29 @@ train_detector(model, train_loader, val_loader, epochs=100, lr=0.001, device='cu
 
 # Visualize attention after training
 visualize_detection_attention(model, val_loader, device, save_path='attention.png')
+```
+
+### Model Comparison
+
+```python
+from models import YOLOCoordAttDetector, YOLOCoordCrossAttDetector
+from engine import train_and_compare_models, print_comparison_results
+
+# Define models to compare
+model_dict = {
+    'CoordAtt': (YOLOCoordAttDetector, {'nc': 2}),
+    'CoordCrossAtt': (YOLOCoordCrossAttDetector, {'nc': 2, 'num_heads': 1}),
+}
+
+# Train and compare
+results = train_and_compare_models(
+    model_dict, train_loader, val_loader,
+    epochs=50, lr=0.001, device='cuda',
+    save_dir='outputs/comparison'
+)
+
+# Print results
+print_comparison_results(results)
 ```
 
 ## Important Implementation Notes
@@ -143,7 +195,7 @@ When using YOLO's `Detect` head, it returns different formats based on training 
 - **Training mode** (`model.training=True`): Returns list of predictions for loss computation
 - **Inference mode** (`model.eval()`): Returns tuple `(concatenated, list)` for NMS/post-processing
 
-**Important**: The `engine/detector.py` `validate()` function temporarily sets `model.detect.train()` during validation to ensure loss computation works correctly, while keeping other layers (BatchNorm, Dropout) in eval mode.
+The `engine/detector.py` `validate()` function temporarily sets `model.detect.train()` during validation.
 
 ### Stride Alignment
 
@@ -155,28 +207,20 @@ The `YOLOCoordAttDetector` backbone produces feature maps at strides 4/8/16/32, 
 
 When saving training history to JSON, always convert PyTorch types to Python native types:
 ```python
-history['train_loss'].append(float(train_loss))  # Not train_loss.item()
+history['train_loss'].append(float(train_loss))
 history['lr'].append(float(optimizer.param_groups[0]['lr']))
 ```
 
 ## Testing New Components
 
-When adding a new model (like `att.py`), create a corresponding test file in `tests/` following the existing pattern:
+When adding a new model, create a corresponding test file in `tests/`:
 1. Create random input tensor(s)
 2. Instantiate module
 3. Forward pass and validate output shape
 4. Backward pass with optimizer to verify learnability
 5. Test multiple input sizes
 
-Then export the model class in `models/__init__.py`.
-
-**Directory structure:**
-```
-tests/          # Unit tests for individual modules
-demos/          # Training/usage demonstration scripts
-visualization/  # Visualization and analysis scripts
-outputs/        # Generated outputs (images, models, logs)
-```
+Export the model class in `models/__init__.py`.
 
 ## Git Commit Conventions
 
@@ -211,15 +255,10 @@ feat: 添加坐标注意力可视化
 
 **多文件变更**（需要正文）：
 ```
-refactor: 重构坐标注意力实现
+refactor: 重构注意力模块代码结构
 
-- 将 CoordAtt 拆分为独立模块
-- 为注意力层添加可视化钩子
-- 更新检测器使用新的 CoordAtt 模块
-- 添加注意力计算单元测试
-```
-
-**Bug 修复**：
-```
-fix: 修正检测头步长对齐问题
+- 将 att.py 拆分为基础模块和可视化模块
+- 新建 att_visualize.py 存放带可视化功能的注意力模块
+- 新建 yolo_att.py 存放 YOLO 检测器
+- 更新 models/__init__.py 导入路径
 ```
