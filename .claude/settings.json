@@ -1,5 +1,4 @@
 {
-  "$schema": "https://cdn.jsdelivr.net/gh/anthropics/claude-code/claude_code_settings_schema.json",
   "environment": {
     "shell": "bash",
     "activate": [
