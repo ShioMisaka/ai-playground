@@ -127,11 +127,20 @@ class YOLOBaseDetector(nn.Module):
             current_idx: 当前层索引
 
         Returns:
-            (output_feature, attention_weights) 或 (output_feature, None, None)
+            (output_feature, attention_weights...) 或 (output_feature, None, None, None, None, None)
         """
         if layer_idx == current_idx:
-            return layer.forward_with_attention(x)
-        return layer(x), None, None
+            result = layer.forward_with_attention(x)
+            # result 可能是 (output, att1, att2) 或 (output, att1, att2, att3, att4)
+            # 统一扩展到 6 个值：(output, att1, att2, att3, att4, att5)
+            num_values = len(result)
+            if num_values == 3:
+                return (*result, None, None, None)
+            elif num_values == 5:
+                return (*result, None)
+            return result
+        # 返回默认值：(output, None, None, None, None, None)
+        return layer(x), None, None, None, None, None
 
     def forward(self, x, targets=None):
         """前向传播（模板方法）"""
@@ -186,40 +195,40 @@ class YOLOBaseDetector(nn.Module):
 
         Returns:
             如果 layer_idx >= 0: (predictions, attention_weights...)
-            否则: (predictions, None, None)
+            否则: (predictions, None, None, None, None, None)
         """
         x = self.conv0(x)
         x = self.conv1(x)
 
-        # 处理各层注意力
+        # 处理各层注意力（现在返回 6 个值）
         x = self.conv2(x)
-        p3_backbone, att1_1, att1_2 = self._forward_attention_layer(
+        p3_backbone, att1_1, att1_2, att1_3, att1_4, att1_5 = self._forward_attention_layer(
             self.coord_att_layers[0], x, layer_idx, 0
         )
 
         x = self.conv3(p3_backbone)
-        p4_backbone, att2_1, att2_2 = self._forward_attention_layer(
+        p4_backbone, att2_1, att2_2, att2_3, att2_4, att2_5 = self._forward_attention_layer(
             self.coord_att_layers[1], x, layer_idx, 1
         )
 
         x = self.conv4(p4_backbone)
-        p5_backbone, att3_1, att3_2 = self._forward_attention_layer(
+        p5_backbone, att3_1, att3_2, att3_3, att3_4, att3_5 = self._forward_attention_layer(
             self.coord_att_layers[2], x, layer_idx, 2
         )
 
         x = self.conv5(p5_backbone)
-        p6_backbone, att4_1, att4_2 = self._forward_attention_layer(
+        p6_backbone, att4_1, att4_2, att4_3, att4_4, att4_5 = self._forward_attention_layer(
             self.coord_att_layers[3], x, layer_idx, 3
         )
 
-        # 提取注意力权重
+        # 提取注意力权重（根据不同的注意力类型返回不同的值）
         if layer_idx >= 0:
-            att_weights = (att4_1, att4_2) if layer_idx == 3 else \
-                         (att3_1, att3_2) if layer_idx == 2 else \
-                         (att2_1, att2_2) if layer_idx == 1 else \
-                         (att1_1, att1_2)
+            att_weights = (att4_1, att4_2, att4_3, att4_4, att4_5) if layer_idx == 3 else \
+                         (att3_1, att3_2, att3_3, att3_4, att3_5) if layer_idx == 2 else \
+                         (att2_1, att2_2, att2_3, att2_4, att2_5) if layer_idx == 1 else \
+                         (att1_1, att1_2, att1_3, att1_4, att1_5)
         else:
-            att_weights = (None, None)
+            att_weights = (None, None, None, None, None)
 
         # ===== Neck =====
         x = self.up_conv1(p6_backbone)
@@ -241,7 +250,7 @@ class YOLOBaseDetector(nn.Module):
 
         if layer_idx >= 0:
             return (predictions, *att_weights)
-        return predictions, None, None
+        return predictions, None, None, None, None, None
 
 
 class YOLOCoordAttDetector(YOLOBaseDetector):
@@ -279,5 +288,28 @@ class YOLOCoordCrossAttDetector(YOLOBaseDetector):
         """创建 CoordCrossAtt 注意力层"""
         from .att_visualize import CoordCrossAttWithVisualization
         return CoordCrossAttWithVisualization(
+            inp=inp, oup=oup, reduction=reduction, num_heads=self.num_heads
+        )
+
+
+class YOLOBiCoordCrossAttDetector(YOLOBaseDetector):
+    """
+    带改进版 Coordinate Cross Attention 的 YOLO 检测器
+
+    实现策略：使用 BiCoordCrossAtt 作为注意力模块
+
+    Args:
+        nc: 类别数量
+        anchors: anchor boxes
+        num_heads: BiCoordCrossAtt 的注意力头数（建议 4）
+    """
+
+    def __init__(self, nc=1, anchors=None, num_heads=4):
+        super().__init__(nc=nc, anchors=anchors, num_heads=num_heads)
+
+    def _create_attention_layer(self, inp, oup, reduction):
+        """创建 ImprovedCoordCrossAtt 注意力层"""
+        from .att_visualize import BiCoordCrossAttWithVisualization
+        return BiCoordCrossAttWithVisualization(
             inp=inp, oup=oup, reduction=reduction, num_heads=self.num_heads
         )

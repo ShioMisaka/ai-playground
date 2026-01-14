@@ -15,6 +15,74 @@ matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 
+# ==================== 内部辅助函数 ====================
+
+def _collect_samples(dataloader, max_samples=4):
+    """从数据加载器中收集样本"""
+    samples = []
+    for imgs, targets, paths in dataloader:
+        for i in range(min(max_samples, len(imgs))):
+            samples.append((imgs[i], targets[targets[:, 0] == i], paths[i]))
+        if len(samples) >= max_samples:
+            break
+    return samples
+
+
+def _draw_gt_boxes(ax, target, img_size):
+    """在坐标轴上绘制 GT 边界框"""
+    if target.shape[0] > 0:
+        for t in target:
+            x, y, w, h = t[2:].cpu().numpy()
+            x1 = (x - w / 2) * img_size
+            y1 = (y - h / 2) * img_size
+            rect = patches.Rectangle(
+                (x1, y1), w * img_size, h * img_size,
+                linewidth=2, edgecolor='green', facecolor='none'
+            )
+            ax.add_patch(rect)
+
+
+def _process_attention_map(attention, img_size):
+    """处理注意力图：上采样并增强对比度"""
+    attention_full = np.array(
+        Image.fromarray((attention * 255).astype(np.uint8)).resize(
+            (img_size, img_size), Image.BILINEAR
+        )
+    ) / 255.0
+    return enhance_contrast(attention_full)
+
+
+def _create_colored_heatmap(weight_h, weight_w, img_display_uint8, img_size):
+    """创建彩色热力图并与原图叠加（用于 ImprovedCoordCrossAtt）"""
+    import cv2
+
+    weight_h = np.clip(weight_h, 0, 1)
+    weight_w = np.clip(weight_w, 0, 1)
+
+    # 广播生成综合热力图
+    heatmap = weight_h[:, None] * weight_w[None, :]
+    heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+
+    # 上采样并应用伪彩色
+    heatmap_resized = cv2.resize(heatmap, (img_size, img_size))
+    heatmap_uint8 = np.uint8(255 * heatmap_resized)
+    heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
+    heatmap_color = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
+
+    # 叠加
+    superimposed = cv2.addWeighted(img_display_uint8, 0.6, heatmap_color, 0.4, 0)
+
+    return heatmap_resized, superimposed
+
+
+def _prepare_img_display(img):
+    """准备图像用于显示（反归一化）"""
+    img_display = img.permute(1, 2, 0).cpu().numpy()
+    return np.clip(img_display, 0, 1)
+
+
+# ==================== 基础工具函数 ====================
+
 def enhance_contrast(attention_map):
     """增强注意力图的对比度"""
     p2, p98 = np.percentile(attention_map, (2, 98))
@@ -70,7 +138,10 @@ def get_coordatt_attention(model, img_tensor, layer_idx=0):
     """
     model.eval()
     with torch.no_grad():
-        _, a_h, a_w = model.forward_with_attention(img_tensor, layer_idx=layer_idx)
+        result = model.forward_with_attention(img_tensor, layer_idx=layer_idx)
+        # result: (predictions, a_h, a_w, None, None, None)
+        # CoordAtt 返回 2 个注意力值 (a_h, a_w)
+        _, a_h, a_w, _, _, _ = result
         attention = (a_h * a_w).squeeze(0).mean(0).cpu().numpy()
     return attention
 
@@ -90,12 +161,47 @@ def get_crossatt_attention(model, img_tensor, layer_idx=0):
     """
     model.eval()
     with torch.no_grad():
-        _, attn, _ = model.forward_with_attention(img_tensor, layer_idx=layer_idx)
+        result = model.forward_with_attention(img_tensor, layer_idx=layer_idx)
+        # result: (predictions, attn, y_att, None, None, None)
+        # CoordCrossAtt 返回 2 个注意力值 (attn, y_att)
+        _, attn, _, _, _, _ = result
         # attn: [1, num_heads, H, W] -> [H, W]
         # 使用相关性矩阵作为注意力图，它包含完整的 H-W 位置信息
         attention = attn.squeeze(0).mean(0).cpu().numpy()
         attn_map = attn.squeeze(0).mean(0).cpu().numpy()
     return attention, attn_map
+
+
+def get_improved_crossatt_attention(model, img_tensor, layer_idx=0):
+    """
+    获取 ImprovedCoordCrossAtt 模型的双向注意力图
+
+    Args:
+        model: 带 forward_with_attention 方法的模型（ImprovedCoordCrossAtt）
+        img_tensor: 输入图像张量
+        layer_idx: 要获取的注意力层索引
+
+    Returns:
+        attn_h: H->W 方向注意力图 [H, W]
+        attn_w: W->H 方向注意力图 [W, H]
+        weight_h: 高度方向门控权重 [H, 1]
+        weight_w: 宽度方向门控权重 [1, W]
+    """
+    model.eval()
+    with torch.no_grad():
+        result = model.forward_with_attention(img_tensor, layer_idx=layer_idx)
+        # result: (predictions, attn_h, attn_w, weight_h, weight_w, _)
+        # ImprovedCoordCrossAtt 返回 5 个注意力值
+        _, attn_h, attn_w, weight_h, weight_w, _ = result
+        # attn_h: [1, num_heads, H, W] -> [H, W]
+        # attn_w: [1, num_heads, W, H] -> [W, H]
+        attn_h = attn_h.squeeze(0).mean(0).cpu().numpy()
+        attn_w = attn_w.squeeze(0).mean(0).cpu().numpy()
+        # weight_h: [1, oup, H, 1] -> [H, 1]
+        # weight_w: [1, oup, 1, W] -> [1, W]
+        weight_h = weight_h.squeeze(0).mean(0).squeeze().cpu().numpy()
+        weight_w = weight_w.squeeze(0).mean(0).squeeze().cpu().numpy()
+    return attn_h, attn_w, weight_h, weight_w
 
 
 # ==================== 检测任务可视化 ====================
@@ -117,80 +223,45 @@ def visualize_detection_attention(model, dataloader, device,
     model.eval()
     model.train()  # 切换到训练模式以获取原始预测
 
-    # 获取样本
-    samples = []
-    for imgs, targets, paths in dataloader:
-        for i in range(min(4, len(imgs))):
-            samples.append((imgs[i], targets[targets[:, 0] == i], paths[i]))
-        if len(samples) >= 4:
-            break
+    samples = _collect_samples(dataloader, max_samples=4)
 
-    # 4张图片，每张展示原图+注意力+叠加
     fig, axes = plt.subplots(4, 4, figsize=(16, 16))
-
     layer_names = ['Layer 1 (P3)', 'Layer 2 (P4)', 'Layer 3 (P5)', 'Layer 4 (P6)']
 
     with torch.no_grad():
         for idx, (img, target, path) in enumerate(samples):
             img_input = img.unsqueeze(0).to(device)
-            img_display = img.permute(1, 2, 0).numpy()
+            img_display = _prepare_img_display(img)
 
             # 显示原始图像 + GT 框
             axes[idx, 0].imshow(img_display)
-            if target.shape[0] > 0:
-                for t in target:
-                    x, y, w, h = t[2:].cpu().numpy()
-                    x1 = (x - w/2) * img_size
-                    y1 = (y - h/2) * img_size
-                    rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                             linewidth=2, edgecolor='green', facecolor='none')
-                    axes[idx, 0].add_patch(rect)
+            _draw_gt_boxes(axes[idx, 0], target, img_size)
             axes[idx, 0].set_title('Original + GT Boxes', fontsize=11)
             axes[idx, 0].axis('off')
 
-            # 获取每一层的注意力（只显示第一层用于简化）
-            for layer_idx in range(1):
-                predictions, a_h, a_w = model.forward_with_attention(img_input, layer_idx=layer_idx)
+            # 获取注意力并显示
+            result = model.forward_with_attention(img_input, layer_idx=0)
+            _, a_h, a_w, _, _, _ = result
+            attention = (a_h * a_w).squeeze(0).mean(0).cpu().numpy()
+            attention_enhanced = _process_attention_map(attention, img_size)
 
-                # 合并注意力
-                attention = (a_h * a_w).squeeze(0).mean(0).cpu().numpy()
+            # 显示注意力热力图
+            axes[idx, 1].imshow(attention_enhanced, cmap='inferno', vmin=0, vmax=1)
+            axes[idx, 1].set_title(f'{layer_names[0]} Attention', fontsize=11)
+            axes[idx, 1].axis('off')
 
-                # 上采样到原始图像大小
-                attention_full = Image.fromarray((attention * 255).astype(np.uint8)).resize(
-                    (img_size, img_size), Image.BILINEAR
-                )
-                attention_full = np.array(attention_full) / 255.0
-
-                # 增强对比度
-                attention_enhanced = enhance_contrast(attention_full)
-
-                # 显示注意力热力图
-                axes[idx, 1].imshow(attention_enhanced, cmap='inferno', vmin=0, vmax=1)
-                axes[idx, 1].set_title(f'{layer_names[layer_idx]} Attention', fontsize=11)
-                axes[idx, 1].axis('off')
-
-                # 叠加注意力 + 检测框
-                axes[idx, 2].imshow(img_display)
-                axes[idx, 2].imshow(attention_enhanced, cmap='inferno', alpha=0.5)
-                if target.shape[0] > 0:
-                    for t in target:
-                        x, y, w, h = t[2:].cpu().numpy()
-                        x1 = (x - w/2) * img_size
-                        y1 = (y - h/2) * img_size
-                        rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                                 linewidth=2, edgecolor='green', facecolor='none')
-                        axes[idx, 2].add_patch(rect)
-                axes[idx, 2].set_title('Attention + GT Boxes', fontsize=11)
-                axes[idx, 2].axis('off')
+            # 叠加注意力 + 检测框
+            axes[idx, 2].imshow(img_display)
+            axes[idx, 2].imshow(attention_enhanced, cmap='inferno', alpha=0.5)
+            _draw_gt_boxes(axes[idx, 2], target, img_size)
+            axes[idx, 2].set_title('Attention + GT Boxes', fontsize=11)
+            axes[idx, 2].axis('off')
 
             # 推理模式下的预测
             model.eval()
             with torch.no_grad():
                 predictions = model(img_input)
-                if isinstance(predictions, tuple):
-                    pred_boxes = predictions[0]
-                else:
-                    pred_boxes = predictions[0]
+                pred_boxes = predictions[0] if isinstance(predictions, tuple) else predictions[0]
 
             axes[idx, 3].imshow(img_display)
             axes[idx, 3].set_title('Predictions', fontsize=11)
@@ -223,46 +294,32 @@ def visualize_attention_comparison(model, dataloader, device,
     # 创建一个未训练的模型用于对比
     untrained_model = YOLOCoordAttDetector(nc=1).to(device)
     untrained_model.train()
-
     model.train()
 
-    # 获取样本
-    samples = []
-    for imgs, targets, paths in dataloader:
-        for i in range(min(2, len(imgs))):
-            samples.append((imgs[i], targets[targets[:, 0] == i], paths[i]))
-        if len(samples) >= 2:
-            break
+    samples = _collect_samples(dataloader, max_samples=2)
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
     with torch.no_grad():
         for idx, (img, target, path) in enumerate(samples):
             img_input = img.unsqueeze(0).to(device)
-            img_display = img.permute(1, 2, 0).numpy()
+            img_display = _prepare_img_display(img)
 
             # 未训练模型 - 使用最后一层 (layer 3)
-            _, a_h_untrained, a_w_untrained = untrained_model.forward_with_attention(img_input, layer_idx=3)
+            result = untrained_model.forward_with_attention(img_input, layer_idx=3)
+            _, a_h_untrained, a_w_untrained, _, _, _ = result
             att_untrained = (a_h_untrained * a_w_untrained).squeeze(0).mean(0).cpu().numpy()
-            att_untrained_full = np.array(Image.fromarray((att_untrained * 255).astype(np.uint8)).resize((img_size, img_size), Image.BILINEAR)) / 255.0
-            att_untrained_enhanced = enhance_contrast(att_untrained_full)
+            att_untrained_enhanced = _process_attention_map(att_untrained, img_size)
 
             # 训练后模型
-            _, a_h_trained, a_w_trained = model.forward_with_attention(img_input, layer_idx=3)
+            result = model.forward_with_attention(img_input, layer_idx=3)
+            _, a_h_trained, a_w_trained, _, _, _ = result
             att_trained = (a_h_trained * a_w_trained).squeeze(0).mean(0).cpu().numpy()
-            att_trained_full = np.array(Image.fromarray((att_trained * 255).astype(np.uint8)).resize((img_size, img_size), Image.BILINEAR)) / 255.0
-            att_trained_enhanced = enhance_contrast(att_trained_full)
+            att_trained_enhanced = _process_attention_map(att_trained, img_size)
 
             # 显示
             axes[idx, 0].imshow(img_display)
-            if target.shape[0] > 0:
-                for t in target:
-                    x, y, w, h = t[2:].cpu().numpy()
-                    x1 = (x - w/2) * img_size
-                    y1 = (y - h/2) * img_size
-                    rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                             linewidth=2, edgecolor='green', facecolor='none')
-                    axes[idx, 0].add_patch(rect)
+            _draw_gt_boxes(axes[idx, 0], target, img_size)
             axes[idx, 0].set_title('Original + GT', fontsize=12)
             axes[idx, 0].axis('off')
 
@@ -272,14 +329,7 @@ def visualize_attention_comparison(model, dataloader, device,
 
             axes[idx, 2].imshow(img_display)
             axes[idx, 2].imshow(att_trained_enhanced, cmap='inferno', alpha=0.6)
-            if target.shape[0] > 0:
-                for t in target:
-                    x, y, w, h = t[2:].cpu().numpy()
-                    x1 = (x - w/2) * img_size
-                    y1 = (y - h/2) * img_size
-                    rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                             linewidth=2, edgecolor='green', facecolor='none')
-                    axes[idx, 2].add_patch(rect)
+            _draw_gt_boxes(axes[idx, 2], target, img_size)
             axes[idx, 2].set_title('After Training + GT', fontsize=12)
             axes[idx, 2].axis('off')
 
@@ -306,7 +356,8 @@ def visualize_single_image_attention(model, img_tensor, img_display,
     model.eval()
 
     with torch.no_grad():
-        output, a_h, a_w = model.forward_with_attention(img_tensor)
+        result = model.forward_with_attention(img_tensor)
+        _, a_h, a_w, _, _, _ = result
 
     # 处理注意力权重
     attention_map = (a_h * a_w).squeeze(0)  # (C, H, W)
@@ -369,7 +420,8 @@ def visualize_multiple_images_attention(model, image_dir, num_samples=4,
 
         # 获取注意力
         with torch.no_grad():
-            output, a_h, a_w = model.forward_with_attention(img_tensor)
+            result = model.forward_with_attention(img_tensor)
+            _, a_h, a_w, _, _, _ = result
 
         # 处理注意力图
         attention_map = (a_h * a_w).squeeze(0).mean(0).cpu().numpy()
@@ -421,39 +473,24 @@ def visualize_single_model_attention(model, model_name, val_loader, device,
     """
     print(f"\n生成 {model_name} 注意力可视化...")
 
-    # 获取样本图片
-    samples = []
-    for imgs, targets, paths in val_loader:
-        for i in range(min(4, len(imgs))):
-            samples.append((imgs[i], targets[targets[:, 0] == i], paths[i]))
-        if len(samples) >= 4:
-            break
+    samples = _collect_samples(val_loader, max_samples=4)
 
     # 检查模型类型
     is_crossatt = hasattr(model, 'coord_att_layers') and 'Cross' in type(model).__name__
-
-    # 获取注意力层数量
     num_layers = len(model.coord_att_layers) if hasattr(model, 'coord_att_layers') else 4
 
-    # 为每张样本创建一个图，每张图展示原图+注意力+各层注意力
+    # 为每张样本创建一个图
     for sample_idx, (img, target, path) in enumerate(samples):
         img_input = img.unsqueeze(0).to(device)
-        img_display = img.permute(1, 2, 0).numpy()
+        img_display = _prepare_img_display(img)
 
         # 创建子图：原图 + 注意力 + 叠加 + 各层注意力
-        num_cols = 3 + min(3, num_layers)  # 原图、注意力、叠加、最多3层
+        num_cols = 3 + min(3, num_layers)
         fig, axes = plt.subplots(1, num_cols, figsize=(4 * num_cols, 4))
 
         # 1. 原图 + GT 框
         axes[0].imshow(img_display)
-        if target.shape[0] > 0:
-            for t in target:
-                x, y, w, h = t[2:].cpu().numpy()
-                x1 = (x - w/2) * img_size
-                y1 = (y - h/2) * img_size
-                rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                         linewidth=2, edgecolor='green', facecolor='none')
-                axes[0].add_patch(rect)
+        _draw_gt_boxes(axes[0], target, img_size)
         axes[0].set_title('Original + GT', fontsize=12, fontweight='bold')
         axes[0].axis('off')
 
@@ -464,9 +501,7 @@ def visualize_single_model_attention(model, model_name, val_loader, device,
         else:
             att = get_coordatt_attention(model, img_input, layer_idx)
 
-        att_resized = np.array(Image.fromarray((att * 255).astype(np.uint8)).resize(
-            (img_size, img_size), Image.BILINEAR)) / 255.0
-        att_enhanced = enhance_contrast(att_resized)
+        att_enhanced = _process_attention_map(att, img_size)
 
         axes[1].imshow(att_enhanced, cmap='inferno', vmin=0, vmax=1)
         axes[1].set_title(f'Attention Heatmap\n(Layer 1)', fontsize=12, fontweight='bold')
@@ -475,14 +510,7 @@ def visualize_single_model_attention(model, model_name, val_loader, device,
         # 3. 叠加显示
         axes[2].imshow(img_display)
         axes[2].imshow(att_enhanced, cmap='inferno', alpha=0.5)
-        if target.shape[0] > 0:
-            for t in target:
-                x, y, w, h = t[2:].cpu().numpy()
-                x1 = (x - w/2) * img_size
-                y1 = (y - h/2) * img_size
-                rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                         linewidth=2, edgecolor='green', facecolor='none')
-                axes[2].add_patch(rect)
+        _draw_gt_boxes(axes[2], target, img_size)
         axes[2].set_title('Attention Overlay', fontsize=12, fontweight='bold')
         axes[2].axis('off')
 
@@ -493,9 +521,7 @@ def visualize_single_model_attention(model, model_name, val_loader, device,
             else:
                 layer_att = get_coordatt_attention(model, img_input, layer_i)
 
-            layer_att_resized = np.array(Image.fromarray((layer_att * 255).astype(np.uint8)).resize(
-                (img_size, img_size), Image.BILINEAR)) / 255.0
-            layer_att_enhanced = enhance_contrast(layer_att_resized)
+            layer_att_enhanced = _process_attention_map(layer_att, img_size)
 
             axes[3 + layer_i].imshow(layer_att_enhanced, cmap='inferno', vmin=0, vmax=1)
             axes[3 + layer_i].set_title(f'Layer {layer_i + 1}', fontsize=11)
@@ -528,30 +554,17 @@ def visualize_model_comparison(coordatt_model, crossatt_model, val_loader, devic
     """
     print("\n生成模型对比可视化...")
 
-    # 获取样本图片
-    samples = []
-    for imgs, targets, paths in val_loader:
-        for i in range(min(4, len(imgs))):
-            samples.append((imgs[i], targets[targets[:, 0] == i], paths[i]))
-        if len(samples) >= 4:
-            break
+    samples = _collect_samples(val_loader, max_samples=4)
 
     fig, axes = plt.subplots(4, 4, figsize=(16, 16))
 
     for idx, (img, target, path) in enumerate(samples):
         img_input = img.unsqueeze(0).to(device)
-        img_display = img.permute(1, 2, 0).numpy()
+        img_display = _prepare_img_display(img)
 
         # 原图 + GT 框
         axes[idx, 0].imshow(img_display)
-        if target.shape[0] > 0:
-            for t in target:
-                x, y, w, h = t[2:].cpu().numpy()
-                x1 = (x - w/2) * img_size
-                y1 = (y - h/2) * img_size
-                rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                         linewidth=2, edgecolor='green', facecolor='none')
-                axes[idx, 0].add_patch(rect)
+        _draw_gt_boxes(axes[idx, 0], target, img_size)
         axes[idx, 0].set_title(f'Input + GT', fontsize=10)
         axes[idx, 0].axis('off')
 
@@ -560,19 +573,15 @@ def visualize_model_comparison(coordatt_model, crossatt_model, val_loader, devic
 
         # CoordAtt 注意力
         coordatt_att = get_coordatt_attention(coordatt_model, img_input, layer_idx)
-        coordatt_resized = np.array(Image.fromarray((coordatt_att * 255).astype(np.uint8)).resize(
-            (img_size, img_size), Image.BILINEAR)) / 255.0
-        coordatt_enhanced = enhance_contrast(coordatt_resized)
+        coordatt_enhanced = _process_attention_map(coordatt_att, img_size)
 
         axes[idx, 1].imshow(coordatt_enhanced, cmap='inferno', vmin=0, vmax=1)
         axes[idx, 1].set_title('CoordAtt\n(H × W Attention)', fontsize=10)
         axes[idx, 1].axis('off')
 
-        # CoordCrossAtt - 门控权重
+        # CoordCrossAtt 注意力
         crossatt_att, _ = get_crossatt_attention(crossatt_model, img_input, layer_idx)
-        crossatt_resized = np.array(Image.fromarray((crossatt_att * 255).astype(np.uint8)).resize(
-            (img_size, img_size), Image.BILINEAR)) / 255.0
-        crossatt_enhanced = enhance_contrast(crossatt_resized)
+        crossatt_enhanced = _process_attention_map(crossatt_att, img_size)
 
         axes[idx, 2].imshow(crossatt_enhanced, cmap='viridis', vmin=0, vmax=1)
         axes[idx, 2].set_title('CoordCrossAtt\n(H-W Correlation)', fontsize=10)
@@ -581,14 +590,7 @@ def visualize_model_comparison(coordatt_model, crossatt_model, val_loader, devic
         # 叠加对比
         axes[idx, 3].imshow(img_display)
         axes[idx, 3].imshow(coordatt_enhanced, cmap='inferno', alpha=0.4)
-        if target.shape[0] > 0:
-            for t in target:
-                x, y, w, h = t[2:].cpu().numpy()
-                x1 = (x - w/2) * img_size
-                y1 = (y - h/2) * img_size
-                rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                         linewidth=2, edgecolor='green', facecolor='none')
-                axes[idx, 3].add_patch(rect)
+        _draw_gt_boxes(axes[idx, 3], target, img_size)
         axes[idx, 3].set_title('CoordAtt Overlay + GT', fontsize=10)
         axes[idx, 3].axis('off')
 
@@ -621,26 +623,20 @@ def visualize_cross_attention_matrix(crossatt_model, val_loader, device,
         break
 
     img_input = img.unsqueeze(0).to(device)
-    img_display = img.permute(1, 2, 0).numpy()
+    img_display = _prepare_img_display(img)
 
     fig, axes = plt.subplots(1, 4, figsize=(16, 4))
 
     axes[0].imshow(img_display)
-    if target.shape[0] > 0:
-        for t in target:
-            x, y, w, h = t[2:].cpu().numpy()
-            x1 = (x - w/2) * img_size
-            y1 = (y - h/2) * img_size
-            rect = patches.Rectangle((x1, y1), w*img_size, h*img_size,
-                                     linewidth=2, edgecolor='green', facecolor='none')
-            axes[0].add_patch(rect)
+    _draw_gt_boxes(axes[0], target, img_size)
     axes[0].set_title('Input + GT', fontsize=12)
     axes[0].axis('off')
 
     crossatt_model.eval()
     with torch.no_grad():
         for layer_idx in range(min(3, len(crossatt_model.coord_att_layers))):
-            _, attn, _ = crossatt_model.forward_with_attention(img_input, layer_idx=layer_idx)
+            result = crossatt_model.forward_with_attention(img_input, layer_idx=layer_idx)
+            _, attn, _, _, _, _ = result
             attn_map = attn.squeeze(0).mean(0).cpu().numpy()
 
             im = axes[layer_idx + 1].imshow(attn_map, cmap='RdYlBu_r', aspect='auto')
@@ -695,4 +691,183 @@ def visualize_training_progress(history_dict, save_path='training_progress.png')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f"训练进度图已保存到: {save_path}")
+    plt.close()
+
+
+# ==================== ImprovedCoordCrossAtt 专用可视化 ====================
+
+def visualize_improved_cross_attention(model, val_loader, device,
+                                       save_path='improved_cross_attention.png',
+                                       img_size=256, layer_idx=3):
+    """
+    可视化 ImprovedCoordCrossAtt 的双向注意力机制
+
+    Args:
+        model: ImprovedCoordCrossAtt 模型
+        val_loader: 验证数据加载器
+        device: 设备
+        save_path: 保存路径
+        img_size: 图像大小
+        layer_idx: 要可视化的层索引 (0-3)，默认 3（最深层，语义最强）
+    """
+    import cv2
+
+    print(f"\n生成 ImprovedCoordCrossAtt 双向注意力可视化 (Layer {layer_idx})...")
+
+    samples = _collect_samples(val_loader, max_samples=4)
+
+    fig, axes = plt.subplots(4, 4, figsize=(16, 16))
+    layer_names = ['Layer 0 (P3)', 'Layer 1 (P4)', 'Layer 2 (P5)', 'Layer 3 (P6)']
+
+    for idx, (img, target, path) in enumerate(samples):
+        img_input = img.unsqueeze(0).to(device)
+        img_display = _prepare_img_display(img)
+        img_display_uint8 = (img_display * 255).astype(np.uint8)
+
+        # 原图 + GT 框
+        axes[idx, 0].imshow(img_display)
+        _draw_gt_boxes(axes[idx, 0], target, img_size)
+        axes[idx, 0].set_title('Input + GT', fontsize=11)
+        axes[idx, 0].axis('off')
+
+        # 获取双向门控权重并创建热力图
+        _, _, weight_h, weight_w = get_improved_crossatt_attention(model, img_input, layer_idx)
+        heatmap_resized, superimposed = _create_colored_heatmap(weight_h, weight_w, img_display_uint8, img_size)
+
+        # 显示 H 方向权重（扩展为条形）
+        weight_h_clipped = np.clip(weight_h, 0, 1)
+        h_display = cv2.resize(weight_h_clipped.reshape(-1, 1), (img_size // 8, img_size))
+        axes[idx, 1].imshow(h_display, cmap='jet', aspect='auto', vmin=0, vmax=1)
+        axes[idx, 1].set_title('Vertical Attn', fontsize=11)
+        axes[idx, 1].axis('off')
+
+        # 显示 W 方向权重（扩展为条形）
+        weight_w_clipped = np.clip(weight_w, 0, 1)
+        w_display = cv2.resize(weight_w_clipped.reshape(1, -1), (img_size, img_size // 8))
+        axes[idx, 2].imshow(w_display, cmap='jet', aspect='auto', vmin=0, vmax=1)
+        axes[idx, 2].set_title('Horizontal Attn', fontsize=11)
+        axes[idx, 2].axis('off')
+
+        # 显示综合热力图
+        axes[idx, 3].imshow(superimposed)
+        _draw_gt_boxes(axes[idx, 3], target, img_size)
+        axes[idx, 3].set_title('Attention Overlay', fontsize=11)
+        axes[idx, 3].axis('off')
+
+    plt.suptitle(f'ImprovedCoordCrossAtt: {layer_names[layer_idx]}\n'
+                 'Vertical × Horizontal = Combined Attention',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"双向注意力可视化已保存到: {save_path}")
+    plt.close()
+
+
+def visualize_improved_cross_attention_all_layers(model, val_loader, device,
+                                                  save_path='improved_cross_attention_all_layers.png',
+                                                  img_size=256):
+    """
+    可视化 ImprovedCoordCrossAtt 所有层的注意力
+
+    Args:
+        model: ImprovedCoordCrossAtt 模型
+        val_loader: 验证数据加载器
+        device: 设备
+        save_path: 保存路径
+        img_size: 图像大小
+    """
+    print("\n生成 ImprovedCoordCrossAtt 所有层注意力可视化...")
+
+    # 获取单个样本
+    for imgs, targets, paths in val_loader:
+        img = imgs[0]
+        target = targets[targets[:, 0] == 0]
+        break
+
+    img_input = img.unsqueeze(0).to(device)
+    img_display = _prepare_img_display(img)
+    img_display_uint8 = (img_display * 255).astype(np.uint8)
+
+    layer_names = ['Layer 0 (P3)', 'Layer 1 (P4)', 'Layer 2 (P5)', 'Layer 3 (P6)']
+
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+
+    # 第一行：原图 + 各层热力图
+    axes[0, 0].imshow(img_display)
+    _draw_gt_boxes(axes[0, 0], target, img_size)
+    axes[0, 0].set_title('Input + GT', fontsize=12)
+    axes[0, 0].axis('off')
+
+    for layer_idx in range(4):
+        _, _, weight_h, weight_w = get_improved_crossatt_attention(model, img_input, layer_idx)
+        _, superimposed = _create_colored_heatmap(weight_h, weight_w, img_display_uint8, img_size)
+
+        col = layer_idx + 1 if layer_idx < 3 else 3
+        row = 0 if layer_idx < 3 else 1
+
+        axes[row, col].imshow(superimposed)
+        _draw_gt_boxes(axes[row, col], target, img_size)
+        axes[row, col].set_title(layer_names[layer_idx], fontsize=12)
+        axes[row, col].axis('off')
+
+    plt.suptitle('ImprovedCoordCrossAtt: Attention Across All Layers',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"所有层注意力可视化已保存到: {save_path}")
+    plt.close()
+
+
+def visualize_improved_cross_attention_overlay(model, val_loader, device,
+                                               save_path='improved_cross_attention_overlay.png',
+                                               img_size=256, layer_idx=3):
+    """
+    可视化 ImprovedCoordCrossAtt 的注意力叠加效果（详细版）
+
+    Args:
+        model: ImprovedCoordCrossAtt 模型
+        val_loader: 验证数据加载器
+        device: 设备
+        save_path: 保存路径
+        img_size: 图像大小
+        layer_idx: 要可视化的层索引 (0-3)，默认 3（最深层）
+    """
+    print(f"\n生成 ImprovedCoordCrossAtt 注意力叠加可视化 (Layer {layer_idx})...")
+
+    samples = _collect_samples(val_loader, max_samples=4)
+
+    fig, axes = plt.subplots(4, 3, figsize=(12, 16))
+
+    for idx, (img, target, path) in enumerate(samples):
+        img_input = img.unsqueeze(0).to(device)
+        img_display = _prepare_img_display(img)
+        img_display_uint8 = (img_display * 255).astype(np.uint8)
+
+        # 原图 + GT 框
+        axes[idx, 0].imshow(img_display)
+        _draw_gt_boxes(axes[idx, 0], target, img_size)
+        axes[idx, 0].set_title('Input + GT', fontsize=12)
+        axes[idx, 0].axis('off')
+
+        # 获取双向门控权重并创建热力图
+        _, _, weight_h, weight_w = get_improved_crossatt_attention(model, img_input, layer_idx)
+        heatmap_resized, superimposed = _create_colored_heatmap(weight_h, weight_w, img_display_uint8, img_size)
+
+        # 显示纯热力图
+        axes[idx, 1].imshow(heatmap_resized, cmap='jet')
+        axes[idx, 1].set_title('Heatmap (V×H)', fontsize=12)
+        axes[idx, 1].axis('off')
+
+        # 显示叠加图
+        axes[idx, 2].imshow(superimposed)
+        _draw_gt_boxes(axes[idx, 2], target, img_size)
+        axes[idx, 2].set_title('Overlay + GT', fontsize=12)
+        axes[idx, 2].axis('off')
+
+    layer_names = ['Layer 0 (P3)', 'Layer 1 (P4)', 'Layer 2 (P5)', 'Layer 3 (P6)']
+    plt.suptitle(f'ImprovedCoordCrossAtt: {layer_names[layer_idx]}',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"注意力叠加可视化已保存到: {save_path}")
     plt.close()

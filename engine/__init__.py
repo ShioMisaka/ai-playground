@@ -13,6 +13,7 @@ from .visualize import (
     load_image,
     get_coordatt_attention,
     get_crossatt_attention,
+    get_improved_crossatt_attention,
     # 检测任务可视化
     visualize_detection_attention,
     visualize_attention_comparison,
@@ -24,6 +25,10 @@ from .visualize import (
     visualize_model_comparison,
     visualize_cross_attention_matrix,
     visualize_training_progress,
+    # ImprovedCoordCrossAtt 专用可视化
+    visualize_improved_cross_attention,
+    visualize_improved_cross_attention_all_layers,
+    visualize_improved_cross_attention_overlay,
 )
 
 # 模型对比模块
@@ -50,6 +55,7 @@ __all__ = [
     'load_image',
     'get_coordatt_attention',
     'get_crossatt_attention',
+    'get_improved_crossatt_attention',
 
     # 可视化 - 检测任务
     'visualize_detection_attention',
@@ -64,6 +70,11 @@ __all__ = [
     'visualize_model_comparison',
     'visualize_cross_attention_matrix',
     'visualize_training_progress',
+
+    # 可视化 - ImprovedCoordCrossAtt
+    'visualize_improved_cross_attention',
+    'visualize_improved_cross_attention_all_layers',
+    'visualize_improved_cross_attention_overlay',
 
     # 模型对比
     'train_and_compare_models',
