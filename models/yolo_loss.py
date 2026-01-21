@@ -214,7 +214,15 @@ class YOLOLoss(nn.Module):
         
         return total_loss
     
-    def bbox_iou(self, box1, box2, eps=1e-7):
+    def bbox_iou(    
+        box1: torch.Tensor,
+        box2: torch.Tensor,
+        xywh: bool = True,
+        GIoU: bool = False,
+        DIoU: bool = False,
+        CIoU: bool = False,
+        eps: float = 1e-7,
+    ) -> torch.Tensor:
         """
         计算两个box的IoU
         box1: [N, 4] (x, y, w, h) 中心坐标格式
@@ -222,27 +230,27 @@ class YOLOLoss(nn.Module):
         返回: [N, M] IoU矩阵
         """
         # 转换为 (x1, y1, x2, y2) 格式
-        b1_x1 = box1[:, 0:1] - box1[:, 2:3] / 2
-        b1_y1 = box1[:, 1:2] - box1[:, 3:4] / 2
-        b1_x2 = box1[:, 0:1] + box1[:, 2:3] / 2
-        b1_y2 = box1[:, 1:2] + box1[:, 3:4] / 2
-        
-        b2_x1 = box2[:, 0:1].T - box2[:, 2:3].T / 2
-        b2_y1 = box2[:, 1:2].T - box2[:, 3:4].T / 2
-        b2_x2 = box2[:, 0:1].T + box2[:, 2:3].T / 2
-        b2_y2 = box2[:, 1:2].T + box2[:, 3:4].T / 2
+        if xywh:  # transform from xywh to xyxy
+            (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+            w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+            b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+            b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+        else:  # x1, y1, x2, y2 = box1
+            b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+            b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+            w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+            w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
         
         # 交集
-        inter_x1 = torch.max(b1_x1, b2_x1)
-        inter_y1 = torch.max(b1_y1, b2_y1)
-        inter_x2 = torch.min(b1_x2, b2_x2)
-        inter_y2 = torch.min(b1_y2, b2_y2)
+        # Intersection area
+        inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
+            b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
+        ).clamp_(0)
         
-        inter_area = torch.clamp(inter_x2 - inter_x1, min=0) * torch.clamp(inter_y2 - inter_y1, min=0)
+        # Union Area
+        union = w1 * h1 + w2 * h2 - inter + eps
+
+        # IoU
+        iou = inter / union
         
-        # 并集
-        b1_area = (b1_x2 - b1_x1) * (b1_y2 - b1_y1)
-        b2_area = (b2_x2 - b2_x1) * (b2_y2 - b2_y1)
-        union_area = b1_area + b2_area.T - inter_area + eps
-        
-        return inter_area / union_area
+        return iou
