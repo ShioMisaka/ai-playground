@@ -26,56 +26,56 @@ class YOLOv3(nn.Module):
             ]
         
         # ===== Backbone: Darknet53 =====
-        self.conv0 = Conv(3, 32, 3, 1)          # 0
-        self.conv1 = Conv(32, 64, 3, 2)         # 1-P1/2
-        self.bottleneck2 = Bottleneck(64, 64)   # 2
-        self.conv3 = Conv(64, 128, 3, 2)        # 3-P2/4
+        self.conv0 = Conv(3, 8, 3, 1)           # 0
+        self.conv1 = Conv(8, 16, 3, 2)          # 1-P1/2
+        self.bottleneck2 = Bottleneck(16, 16)   # 2
+        self.conv3 = Conv(16, 32, 3, 2)         # 3-P2/4
         self.bottleneck4 = nn.Sequential(       # 4
-            Bottleneck(128, 128),
-            Bottleneck(128, 128)
+            Bottleneck(32, 32),
+            Bottleneck(32, 32)
         )
-        self.conv5 = Conv(128, 256, 3, 2)       # 5-P3/8
+        self.conv5 = Conv(32, 64, 3, 2)         # 5-P3/8
         self.bottleneck6 = nn.Sequential(       # 6
-            *[Bottleneck(256, 256) for _ in range(8)]
+            *[Bottleneck(64, 64) for _ in range(8)]
         )
-        self.conv7 = Conv(256, 512, 3, 2)       # 7-P4/16
+        self.conv7 = Conv(64, 128, 3, 2)        # 7-P4/16
         self.bottleneck8 = nn.Sequential(       # 8
-            *[Bottleneck(512, 512) for _ in range(8)]
+            *[Bottleneck(128, 128) for _ in range(8)]
         )
-        self.conv9 = Conv(512, 1024, 3, 2)      # 9-P5/32
+        self.conv9 = Conv(128, 256, 3, 2)       # 9-P5/32
         self.bottleneck10 = nn.Sequential(      # 10
-            *[Bottleneck(1024, 1024) for _ in range(4)]
+            *[Bottleneck(256, 256) for _ in range(4)]
         )
         
         # ===== Head: YOLOv3 Detection Head =====
         # Large objects (P5/32)
-        self.bottleneck11 = Bottleneck(1024, 1024, shortcut=False)  # 11
-        self.conv12 = Conv(1024, 512, 1, 1)     # 12
-        self.conv13 = Conv(512, 1024, 3, 1)     # 13
-        self.conv14 = Conv(1024, 512, 1, 1)     # 14
-        self.conv15 = Conv(512, 1024, 3, 1)     # 15 (P5/32-large)
+        self.bottleneck11 = Bottleneck(256, 256, shortcut=False)  # 11
+        self.conv12 = Conv(256, 128, 1, 1)    # 12
+        self.conv13 = Conv(128, 256, 3, 1)    # 13
+        self.conv14 = Conv(256, 128, 1, 1)    # 14
+        self.conv15 = Conv(128, 256, 3, 1)    # 15 (P5/32-large)
         
         # Medium objects (P4/16)
-        self.conv16 = Conv(512, 256, 1, 1)      # 16 (from conv14)
+        self.conv16 = Conv(128, 64, 1, 1)       # 16 (from conv14)
         self.upsample17 = nn.Upsample(None, 2, mode='nearest')  # 17
         self.concat18 = Concat(dimension=1)           # 18 (concat with bottleneck8)
-        self.bottleneck19 = Bottleneck(768, 512, shortcut=False)  # 19
-        self.bottleneck20 = Bottleneck(512, 512, shortcut=False)  # 20
-        self.conv21 = Conv(512, 256, 1, 1)      # 21
-        self.conv22 = Conv(256, 512, 3, 1)      # 22 (P4/16-medium)
+        self.bottleneck19 = Bottleneck(192, 128, shortcut=False)  # 19
+        self.bottleneck20 = Bottleneck(128, 128, shortcut=False)  # 20
+        self.conv21 = Conv(128, 64, 1, 1)       # 21
+        self.conv22 = Conv(64, 128, 3, 1)       # 22 (P4/16-medium)
         
         # Small objects (P3/8)
-        self.conv23 = Conv(256, 128, 1, 1)      # 23 (from conv21)
+        self.conv23 = Conv(64, 32, 1, 1)       # 23 (from conv21)
         self.upsample24 = nn.Upsample(None, 2, mode='nearest')  # 24
         self.concat25 = Concat(dimension=1)           # 25 (concat with bottleneck6)
-        self.bottleneck26 = Bottleneck(384, 256, shortcut=False)  # 26
+        self.bottleneck26 = Bottleneck(96, 64, shortcut=False)  # 26
         self.bottleneck27 = nn.Sequential(      # 27 (P3/8-small)
-            Bottleneck(256, 256, shortcut=False),
-            Bottleneck(256, 256, shortcut=False)
+            Bottleneck(64, 64, shortcut=False),
+            Bottleneck(64, 64, shortcut=False)
         )
         
         # Detection layers
-        self.detect = Detect(nc=nc, anchors=anchors, ch=(256, 512, 1024))  # 28
+        self.detect = Detect(nc=nc, anchors=anchors, ch=(64, 128, 256))  # 28
 
         # 添加loss计算器
         self.loss_fn = YOLOLoss(

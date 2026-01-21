@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 
 from models import YOLOv3
@@ -29,7 +33,7 @@ def test02():
         model=model,
         config_path='datasets/MY_TEST_DATA/data.yaml',
         epochs=2,
-        batch_size=4,
+        batch_size=8,
         img_size=640,
         lr=0.01,
         device='cuda',

@@ -39,7 +39,18 @@ def test(model: nn.Module, test_data, test_size = 2):
 
 def validate(model, dataloader, device):
     """验证模型"""
+    # 保存 Detect 层的原始训练状态
+    detect_training_state = None
+    if hasattr(model, 'detect'):
+        detect_training_state = model.detect.training
+        model.detect.train()  # 确保 Detect 层在训练模式，以便正确计算 loss
+
     model.eval()
+
+    # model.eval() 会将所有子模块设为 eval 模式，需要重新设置 detect 为 train 模式
+    if hasattr(model, 'detect'):
+        model.detect.train()
+
     total_loss = 0
     
     with torch.no_grad():
@@ -75,5 +86,10 @@ def validate(model, dataloader, device):
                 loss = loss.mean()
             
             total_loss += loss.item()
-    
+
+    # 恢复 Detect 层的原始状态
+    if hasattr(model, 'detect') and detect_training_state is not None:
+        if not detect_training_state:
+            model.detect.eval()
+
     return total_loss / len(dataloader)
