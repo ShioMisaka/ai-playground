@@ -1,9 +1,20 @@
 # engine/__init__.py
 
+# 主训练流程
 from .train import train
-from .model_info import print_training_info, print_model_summary, get_model_summary
-from .validate import evaluate, test
-from .classifier import (train_one_epoch, validate, train_classifier)
+
+# 核心训练逻辑
+from .training import train_one_epoch, print_metrics
+
+# 验证和测试
+from .validate import evaluate, test, validate
+
+# 简单/遗留训练函数
+from .simple import train_fc
+
+# 分类和检测专用训练
+from .classifier import (train_one_epoch as train_one_epoch_cls,
+                         validate as validate_cls, train_classifier)
 from .detector import (train_one_epoch as train_one_epoch_det,
                        validate as validate_det, train_detector)
 
@@ -40,16 +51,24 @@ from .comparison import (
 )
 
 __all__ = [
-    # 训练
+    # 主训练
     'train',
+
+    # 核心训练逻辑
     'train_one_epoch',
-    'validate',
-    'train_classifier',
-    'train_detector',
+    'print_metrics',
 
     # 验证/测试
+    'validate',
     'evaluate',
     'test',
+
+    # 简单训练
+    'train_fc',
+
+    # 分类和检测专用
+    'train_classifier',
+    'train_detector',
 
     # 可视化 - 基础工具
     'enhance_contrast',

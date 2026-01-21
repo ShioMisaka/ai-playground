@@ -3,7 +3,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from typing import Optional, Dict, List
 
-from .metrics import compute_classification_metrics, format_metrics
+from utils.metrics import compute_classification_metrics, format_metrics
 
 def evaluate(test_data, model):
     model.eval()
