@@ -6,7 +6,7 @@
 
 本项目实现了多个经典的深度学习模型，特别关注：
 
-- **YOLOv3** - 完整的目标检测系统
+- **YOLOv3** - 完整的目标检测系统（支持 WIoU v3 损失函数）
 - **Coordinate Attention (CoordAtt)** - 坐标注意力机制
 - **Coordinate Cross Attention (CoordCrossAtt)** - 坐标交叉注意力机制
 - **BiFPN** - 双向特征金字塔网络，支持多尺度特征融合
@@ -32,7 +32,13 @@ python tests/att_test.py
 
 ### 训练和可视化
 
-#### 1. 训练 YOLO + CoordAtt 检测器
+#### 1. 训练 YOLOv3
+
+```bash
+python demos/yolov3_demo.py
+```
+
+#### 2. 训练 YOLO + CoordAtt 检测器
 
 ```bash
 python visualization/visualize_trained_coordatt.py
@@ -44,7 +50,7 @@ python visualization/visualize_trained_coordatt.py
 - `detection_attention.png` - 检测注意力可视化
 - `attention_comparison.png` - 训练前后注意力对比
 
-#### 2. 对比 CoordAtt vs CoordCrossAtt
+#### 3. 对比 CoordAtt vs CoordCrossAtt
 
 ```bash
 python visualization/compare_attention_mechanisms.py
@@ -56,7 +62,7 @@ python visualization/compare_attention_mechanisms.py
 - `cross_attention_matrix.png` - Cross-Attention 相关性矩阵
 - `training_progress.png` - 训练进度对比
 
-#### 3. 测试已训练模型（不进行训练）
+#### 4. 测试已训练模型（不进行训练）
 
 ```bash
 # 测试完整数据集
@@ -72,7 +78,7 @@ python scripts/test_attention.py \
     --output outputs/test_results
 ```
 
-#### 4. 可视化未训练的注意力
+#### 5. 可视化未训练的注意力
 
 ```bash
 # 查看 CoordAtt 在随机初始化时的注意力分布
@@ -88,17 +94,21 @@ ai-playground/
 │   ├── att_visualize.py    # 带可视化功能的注意力模块
 │   ├── yolo_att.py         # YOLO + Attention 检测器
 │   ├── yolov3.py           # YOLOv3 目标检测
+│   ├── yolo_loss.py        # YOLO loss function
 │   ├── bifpn.py            # BiFPN 特征融合
 │   ├── conv.py             # 自定义卷积层 (Conv+BN+SiLU)
 │   └── ...
 ├── engine/                 # 训练和可视化引擎
 │   ├── detector.py         # YOLO 检测训练
+│   ├── train.py            # 训练主循环
+│   ├── validate.py         # 验证函数
 │   ├── visualize.py        # 注意力可视化函数
 │   └── comparison.py       # 模型对比训练
 ├── utils/                  # 数据加载工具
 ├── tests/                  # 单元测试
 ├── visualization/          # 训练入口脚本
 ├── scripts/                # 测试脚本
+├── demos/                  # 快速演示脚本
 ├── datasets/               # 数据集存储
 └── outputs/                # 输出结果
 ```

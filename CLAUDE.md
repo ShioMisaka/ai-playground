@@ -29,6 +29,9 @@ python visualization/visualize_trained_coordatt.py
 
 # Compare CoordAtt vs CoordCrossAtt
 python visualization/compare_attention_mechanisms.py
+
+# Train YOLOv3
+python demos/yolov3_demo.py
 ```
 
 ### Testing (No Training)
@@ -62,17 +65,18 @@ python visualization/visualize_coordatt.py
 - `att.py` - Base attention modules: `CoordAtt`, `CoordCrossAtt`
 - `att_visualize.py` - Attention with visualization hooks: `CoordAttWithVisualization`, `CoordCrossAttWithVisualization`
 - `yolo_att.py` - YOLO detectors: `YOLOCoordAttDetector`, `YOLOCoordCrossAttDetector`
-- `yolov3.py` - Complete YOLOv3 with Darknet-53 backbone
+- `yolov3.py` - YOLOv3 with Darknet-53 backbone
+- `yolo_loss.py` - YOLO loss function (supports WIoU v3)
 - `bifpn.py` - `BiFPN_Cat` for multi-scale feature fusion
 - `conv.py` - `Conv` wrapper (Conv2d + BatchNorm + SiLU)
 - `head.py` - `Detect` detection head for YOLO
-- `yolo_loss.py` - YOLO loss function
 
 **Export in `models/__init__.py`:**
 ```python
 from .att import CoordAtt, CoordCrossAtt
 from .att_visualize import CoordAttWithVisualization, CoordCrossAttWithVisualization
 from .yolo_att import YOLOCoordAttDetector, YOLOCoordCrossAttDetector
+from .yolov3 import YOLOv3
 ```
 
 ### engine/ - Training and Visualization Engine
