@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from .conv import Conv, Concat
-from .block import Bottleneck
-from .head import Detect
-from .yolo_loss import YOLOLoss
+from modules.conv import Conv, Concat
+from modules.block import Bottleneck
+from modules.head import Detect
+from modules.yolo_loss import YOLOLoss
 
 class YOLOv3(nn.Module):
     """YOLOv3 model with clear network structure"""

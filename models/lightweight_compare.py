@@ -9,8 +9,8 @@
 """
 import torch
 import torch.nn as nn
-from .att_visualize import CoordAttWithVisualization, CoordCrossAttWithVisualization
-from .conv import Conv
+from modules.att_visualize import CoordAttWithVisualization, CoordCrossAttWithVisualization
+from modules.conv import Conv
 
 
 class LightweightCoordAttNet(nn.Module):

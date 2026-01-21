@@ -10,8 +10,8 @@
 """
 import torch
 import torch.nn as nn
-from .conv import Conv
-from .head import Detect
+from modules.conv import Conv
+from modules.head import Detect
 
 
 class YOLOBaseDetector(nn.Module):
@@ -93,7 +93,7 @@ class YOLOBaseDetector(nn.Module):
 
     def _build_loss(self, anchors):
         """构建损失函数（模板方法）"""
-        from .yolo_loss import YOLOLoss
+        from modules.yolo_loss import YOLOLoss
         self.loss_fn = YOLOLoss(
             num_classes=self.nc,
             anchors=anchors,
@@ -265,7 +265,7 @@ class YOLOCoordAttDetector(YOLOBaseDetector):
 
     def _create_attention_layer(self, inp, oup, reduction):
         """创建 CoordAtt 注意力层"""
-        from .att_visualize import CoordAttWithVisualization
+        from modules.att_visualize import CoordAttWithVisualization
         return CoordAttWithVisualization(inp=inp, oup=oup, reduction=reduction)
 
 
@@ -286,7 +286,7 @@ class YOLOCoordCrossAttDetector(YOLOBaseDetector):
 
     def _create_attention_layer(self, inp, oup, reduction):
         """创建 CoordCrossAtt 注意力层"""
-        from .att_visualize import CoordCrossAttWithVisualization
+        from modules.att_visualize import CoordCrossAttWithVisualization
         return CoordCrossAttWithVisualization(
             inp=inp, oup=oup, reduction=reduction, num_heads=self.num_heads
         )
@@ -309,7 +309,7 @@ class YOLOBiCoordCrossAttDetector(YOLOBaseDetector):
 
     def _create_attention_layer(self, inp, oup, reduction):
         """创建 ImprovedCoordCrossAtt 注意力层"""
-        from .att_visualize import BiCoordCrossAttWithVisualization
+        from modules.att_visualize import BiCoordCrossAttWithVisualization
         return BiCoordCrossAttWithVisualization(
             inp=inp, oup=oup, reduction=reduction, num_heads=self.num_heads
         )

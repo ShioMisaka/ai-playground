@@ -1,37 +1,45 @@
 # models/__init__.py
+# 从 modules 导入基础模块，保持向后兼容
 
-from .bifpn import BiFPN_Cat
-
-# 基础注意力模块
-from .att import CoordAtt, CoordCrossAtt, BiCoordCrossAtt
-
-# 带可视化功能的注意力模块
-from .att_visualize import (CoordAttWithVisualization, CoordCrossAttWithVisualization,
-                            BiCoordCrossAttWithVisualization)
+from modules import (
+    BiFPN_Cat,
+    CoordAtt,
+    CoordCrossAtt,
+    BiCoordCrossAtt,
+    CoordAttWithVisualization,
+    CoordCrossAttWithVisualization,
+    BiCoordCrossAttWithVisualization,
+    Bottleneck,
+    Conv,
+    Concat,
+    Detect,
+    YOLOLoss,
+)
 
 # YOLO 检测器
-from .yolo_att import (YOLOCoordAttDetector, YOLOCoordCrossAttDetector,
-                       YOLOBiCoordCrossAttDetector)
+from .yolo_att import (
+    YOLOCoordAttDetector,
+    YOLOCoordCrossAttDetector,
+    YOLOBiCoordCrossAttDetector
+)
 
 # 轻量级对比网络
-from .lightweight_compare import LightweightCoordAttNet, LightweightCoordCrossAttNet
+from .lightweight_compare import (
+    LightweightCoordAttNet,
+    LightweightCoordCrossAttNet
+)
 
-# 基础模块
-from .block import Bottleneck
-from .conv import Conv
-from .head import Detect
+# YOLOv3 模型
 from .yolov3 import YOLOv3
 
 __all__ = [
-    # BiFPN
+    # BiFPN (from modules)
     'BiFPN_Cat',
 
-    # 基础注意力
+    # 注意力 (from modules)
     'CoordAtt',
     'CoordCrossAtt',
     'BiCoordCrossAtt',
-
-    # 带可视化的注意力
     'CoordAttWithVisualization',
     'CoordCrossAttWithVisualization',
     'BiCoordCrossAttWithVisualization',
@@ -45,9 +53,11 @@ __all__ = [
     'LightweightCoordAttNet',
     'LightweightCoordCrossAttNet',
 
-    # 基础模块
+    # 基础模块 (from modules)
     'Bottleneck',
     'Conv',
+    'Concat',
     'Detect',
+    'YOLOLoss',
     'YOLOv3',
 ]
