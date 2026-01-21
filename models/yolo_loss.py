@@ -215,47 +215,80 @@ class YOLOLoss(nn.Module):
         
         return total_loss
     
-    def bbox_iou(    
+    def bbox_iou(self,
         box1: torch.Tensor,
         box2: torch.Tensor,
         GIoU: bool = False,
         DIoU: bool = False,
         CIoU: bool = False,
+        WIoU: bool = False,
+        self_iou_mean: float = None,
         eps: float = 1e-7,
     ) -> torch.Tensor:
         """
-        计算两个box的IoU
+        计算两个box的IoU及其变体
         box1: [N, 4] (x, y, w, h) 中心坐标格式
         box2: [M, 4] (x, y, w, h) 中心坐标格式
         返回: [N, M] IoU矩阵
+
+        参数:
+            WIoU: Wise IoU, 需要配合 self_iou_mean 使用
+            self_iou_mean: WIoU v3 的滑动平均 L_iou 值, None 时使用 WIoU v1
         """
         # 转换为 (x1, y1, x2, y2) 格式
         (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
         w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
         b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
         b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
-        
-        # 交集
+
         # Intersection area
         inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
             b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
         ).clamp_(0)
-        
+
         # Union Area
         union = w1 * h1 + w2 * h2 - inter + eps
         iou = inter / union
-        if CIoU or DIoU or GIoU:
+
+        # --- WIoU / CIoU / DIoU / GIoU 逻辑 ---
+        if CIoU or DIoU or GIoU or WIoU:
             cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)
             ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)
-            if CIoU or DIoU:
+
+            if CIoU or DIoU or WIoU:
+                # 最小包围框的对角线距离 c2
                 c2 = cw.pow(2) + ch.pow(2) + eps
+                # 中心点距离 rho2
                 rho2 = (x2 - x1).pow(2) + (y2 - y1).pow(2)
+
+                if WIoU:
+                    # WIoU v1: R_WIoU * IoU
+                    # exp 中的 3 为超参数（通常为原作者推荐值）
+                    dist_term = torch.exp(rho2 / c2.detach() * 3)
+                    if self_iou_mean is None:
+                        # 如果没有传入均值，退化为 WIoU v1
+                        return iou * dist_term
+                    else:
+                        # WIoU v3: 非单调聚焦机制
+                        # 1. 计算当前 L_iou (使用1-iou)
+                        l_iou = 1.0 - iou
+                        # 2. 计算离群度 beta
+                        beta = l_iou.detach() / self_iou_mean
+                        # 3. 计算非单调聚焦系数 r (超参数 alpha=1.9, delta=3)
+                        alpha = 1.9
+                        delta = 3
+                        r = beta / (delta * alpha.pow(beta - delta))
+                        return iou - (1 - dist_term) * r  # 返回加权后的结果
+
                 if CIoU:
                     v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
                     with torch.no_grad():
                         alpha = v / (v - iou + (1 + eps))
-                    return iou - (rho2 / c2 + v * alpha) # CIoU
-                return iou - rho2 / c2 # DIoU
+                    return iou - (rho2 / c2 + v * alpha)  # CIoU
+
+                return iou - rho2 / c2  # DIoU
+
             c_area = cw * ch + eps
-            return iou - (c_area - union) / c_area # GIoU
-        return iou # IoU
+            return iou - (c_area - union) / c_area  # GIoU
+
+        return iou  # IoU
