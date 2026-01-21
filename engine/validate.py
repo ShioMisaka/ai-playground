@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
+from typing import Optional, Dict, List
+
+from .metrics import compute_classification_metrics, format_metrics
 
 def evaluate(test_data, model):
     model.eval()
@@ -37,8 +40,18 @@ def test(model: nn.Module, test_data, test_size = 2):
     plt.show()
 
 
-def validate(model, dataloader, device):
-    """验证模型"""
+def validate(model, dataloader, device, nc=None):
+    """验证模型，返回详细指标
+
+    Args:
+        model: 模型
+        dataloader: 数据加载器
+        device: 设备
+        nc: 类别数量，用于计算准确率
+
+    Returns:
+        dict: 包含 loss, accuracy 等指标的字典
+    """
     # 保存 Detect 层的原始训练状态
     detect_training_state = None
     if hasattr(model, 'detect'):
@@ -52,12 +65,18 @@ def validate(model, dataloader, device):
         model.detect.train()
 
     total_loss = 0
-    
+    all_predictions = []
+    all_targets = []
+
+    # 检测任务：收集所有预测
+    all_detections = []
+    all_gt_boxes = []
+
     with torch.no_grad():
         for imgs, targets, paths in dataloader:
             imgs = imgs.to(device)
             targets = targets.to(device)
-            
+
             # 尝试不同的调用方式
             try:
                 outputs = model(imgs, targets)
@@ -70,26 +89,69 @@ def validate(model, dataloader, device):
                 else:
                     loss = torch.tensor(1.0, device=device)
                     outputs = {'loss': loss}
-            
+
             # 获取loss
             if isinstance(outputs, dict):
                 loss = outputs.get('loss', None)
+                predictions = outputs.get('predictions', outputs)
                 if loss is None:
                     raise ValueError("无法获取loss")
             elif isinstance(outputs, (tuple, list)):
                 loss = outputs[-1]
+                predictions = outputs[0]
             else:
                 loss = outputs
-            
+                predictions = outputs
+
             # 确保loss是标量
             if hasattr(loss, 'dim') and loss.dim() > 0:
                 loss = loss.mean()
-            
+
             total_loss += loss.item()
+
+            # 收集预测和目标用于指标计算
+            is_detection = hasattr(model, 'detect')
+
+            if is_detection:
+                # 检测任务：收集检测框
+                if isinstance(predictions, (tuple, list)):
+                    # (concatenated, list) 格式
+                    if len(predictions) >= 2:
+                        all_detections.append(predictions[0])
+                        all_gt_boxes.append(targets)
+                else:
+                    all_detections.append(predictions)
+                    all_gt_boxes.append(targets)
+            else:
+                # 分类任务：收集类别预测
+                if isinstance(predictions, torch.Tensor):
+                    if predictions.dim() > 1 and predictions.size(1) > 1:
+                        # [N, num_classes] -> 收集所有预测
+                        all_predictions.append(predictions)
+                    else:
+                        all_predictions.append(predictions)
+                    all_targets.append(targets)
 
     # 恢复 Detect 层的原始状态
     if hasattr(model, 'detect') and detect_training_state is not None:
         if not detect_training_state:
             model.detect.eval()
 
-    return total_loss / len(dataloader)
+    metrics = {
+        'loss': total_loss / len(dataloader),
+    }
+
+    # 计算额外的指标
+    if hasattr(model, 'detect'):
+        # 检测任务
+        # TODO: 实现 mAP 计算
+        metrics['mAP'] = 0.0  # 占位符
+    else:
+        # 分类任务：计算准确率
+        if nc is not None and all_predictions:
+            all_predictions = torch.cat(all_predictions, dim=0)
+            all_targets = torch.cat(all_targets, dim=0)
+            cls_metrics = compute_classification_metrics(all_predictions, all_targets, nc)
+            metrics.update(cls_metrics)
+
+    return metrics

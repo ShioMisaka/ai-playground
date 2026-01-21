@@ -1,6 +1,7 @@
 # engine/__init__.py
 
 from .train import train
+from .model_info import print_training_info, print_model_summary, get_model_summary
 from .validate import evaluate, test
 from .classifier import (train_one_epoch, validate, train_classifier)
 from .detector import (train_one_epoch as train_one_epoch_det,
