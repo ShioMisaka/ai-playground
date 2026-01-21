@@ -61,9 +61,9 @@ python visualization/visualize_coordatt.py
 
 ### models/ - Neural Network Components
 
-**File organization (refactored):**
+**File organization:**
 - `att.py` - Base attention modules: `CoordAtt`, `CoordCrossAtt`
-- `att_visualize.py` - Attention with visualization hooks: `CoordAttWithVisualization`, `CoordCrossAttWithVisualization`
+- `att_visualize.py` - Attention with visualization hooks
 - `yolo_att.py` - YOLO detectors: `YOLOCoordAttDetector`, `YOLOCoordCrossAttDetector`
 - `yolov3.py` - YOLOv3 with Darknet-53 backbone
 - `yolo_loss.py` - YOLO loss function (supports WIoU v3)
@@ -71,49 +71,33 @@ python visualization/visualize_coordatt.py
 - `conv.py` - `Conv` wrapper (Conv2d + BatchNorm + SiLU)
 - `head.py` - `Detect` detection head for YOLO
 
-**Export in `models/__init__.py`:**
-```python
-from .att import CoordAtt, CoordCrossAtt
-from .att_visualize import CoordAttWithVisualization, CoordCrossAttWithVisualization
-from .yolo_att import YOLOCoordAttDetector, YOLOCoordCrossAttDetector
-from .yolov3 import YOLOv3
-```
+### engine/ - Training Engine Core
 
-### engine/ - Training and Visualization Engine
-
-**Core modules:**
-- `detector.py` - YOLO detection training (`train_detector()`, `train_one_epoch()`, `validate()`)
+**Core training modules:**
+- `train.py` - Main training flow (`train()`, ~160 lines)
+- `training.py` - Core epoch training logic (`train_one_epoch()`, `print_metrics()`)
+- `validate.py` - Validation logic (`validate()`, `evaluate()`, `test()`)
+- `simple.py` - Simple/legacy training functions (`train_fc()`)
+- `classifier.py` - Classification-specific training
+- `detector.py` - Detection-specific training
+- `comparison.py` - Model comparison training
 - `visualize.py` - All visualization functions
-- `comparison.py` - Model comparison training (`train_and_compare_models()`, `print_comparison_results()`)
 
-**Visualization functions (all in `engine/visualize.py`):**
-```python
-# Basic tools
-load_image()                    # Load and preprocess image
-enhance_contrast()               # Enhance attention map contrast
-get_coordatt_attention()        # Get CoordAtt attention map
-get_crossatt_attention()        # Get CoordCrossAtt attention map
+### utils/ - Utility Modules
 
-# Detection task
-visualize_detection_attention()       # Detection attention with boxes
-visualize_attention_comparison()       # Before/after training comparison
-
-# Single/Multiple images
-visualize_single_image_attention()     # Single image attention
-visualize_multiple_images_attention()  # Multiple images attention
-
-# Model comparison
-visualize_model_comparison()           # Compare CoordAtt vs CoordCrossAtt
-visualize_cross_attention_matrix()     # Cross-Attention correlation matrix
-visualize_training_progress()           # Training progress comparison
-```
+**Utility modules:**
+- `load.py` - Data loading utilities (`create_dataloaders()`)
+- `logger.py` - CSV training logger (`TrainingLogger`)
+- `curves.py` - Training curve plotting (`plot_training_curves()`)
+- `metrics.py` - Evaluation metrics (`compute_*_metrics()`, `format_metrics()`)
+- `model_summary.py` - Model/training info display (`print_training_info()`, `print_model_summary()`)
 
 ### Directory Structure
 
 ```
 models/         # Neural network components
-engine/         # Training and visualization engine
-utils/          # Data loading utilities
+engine/         # Training engine core
+utils/          # Utility modules (logging, plotting, metrics)
 tests/          # Unit tests for individual modules
 visualization/  # Training entry scripts
 scripts/        # Testing scripts (no training)
@@ -125,9 +109,9 @@ outputs/        # Generated outputs (models, images, logs)
 
 ### Custom Conv Wrapper
 
-Use `models.conv.Conv` instead of raw `nn.Conv2d`:
+Use `modules.conv.Conv` instead of raw `nn.Conv2d`:
 ```python
-from models import Conv
+from modules import Conv
 self.cv1 = Conv(c1, c2, k=1, s=1, p=0)  # Conv+BN+SiLU
 self.cv2 = Conv(c1, c2, k=3, s=1, p=1)  # 3x3 with same padding
 ```
@@ -136,7 +120,7 @@ self.cv2 = Conv(c1, c2, k=3, s=1, p=1)  # 3x3 with same padding
 
 Accepts list of tensors with different channels, outputs fused tensor:
 ```python
-from models import BiFPN_Cat
+from modules import BiFPN_Cat
 feat1, feat2, feat3 = torch.randn(1, 128, 40, 40), torch.randn(1, 256, 40, 40), torch.randn(1, 512, 40, 40)
 bifpn = BiFPN_Cat(c1=[128, 256, 512])
 out = bifpn([feat1, feat2, feat3])  # Shape: (1, 512, 40, 40)
@@ -145,50 +129,54 @@ out = bifpn([feat1, feat2, feat3])  # Shape: (1, 512, 40, 40)
 ### Coordinate Attention (Basic)
 
 ```python
-from models import CoordAtt
+from modules import CoordAtt
 att = CoordAtt(inp=256, oup=256, reduction=32)
 out = att(x)  # Same shape as input, attention-weighted
 ```
 
-### YOLO + CoordAtt Detector (For Object Detection)
+### Training a Model
 
 ```python
 from models import YOLOCoordAttDetector
-from engine import train_detector, visualize_detection_attention
+from engine import train
 from utils import create_dataloaders
 
-# Create model with CoordAtt-enhanced backbone
-model = YOLOCoordAttDetector(nc=2)  # nc = number of classes
+# Create model
+model = YOLOCoordAttDetector(nc=2)
 
-# Train the detector
-train_loader, val_loader, _ = create_dataloaders(config_path, batch_size=4, img_size=640)
-train_detector(model, train_loader, val_loader, epochs=100, lr=0.001, device='cuda')
-
-# Visualize attention after training
-visualize_detection_attention(model, val_loader, device, save_path='attention.png')
+# Train (includes CSV logging, curve plotting, model summary)
+train(
+    model,
+    config_path='datasets/MY_TEST_DATA/data.yaml',
+    epochs=100,
+    batch_size=16,
+    img_size=640,
+    lr=0.001,
+    device='cuda',
+    save_dir='runs/train'
+)
 ```
 
-### Model Comparison
+### Using Training Components Directly
 
 ```python
-from models import YOLOCoordAttDetector, YOLOCoordCrossAttDetector
-from engine import train_and_compare_models, print_comparison_results
+from engine import train_one_epoch, print_metrics, validate
+from utils import TrainingLogger, plot_training_curves, print_model_summary
 
-# Define models to compare
-model_dict = {
-    'CoordAtt': (YOLOCoordAttDetector, {'nc': 2}),
-    'CoordCrossAtt': (YOLOCoordCrossAttDetector, {'nc': 2, 'num_heads': 1}),
-}
+# Print model info before training
+print_model_summary(model, img_size=640, nc=2)
 
-# Train and compare
-results = train_and_compare_models(
-    model_dict, train_loader, val_loader,
-    epochs=50, lr=0.001, device='cuda',
-    save_dir='outputs/comparison'
-)
+# Custom training loop with CSV logging
+with TrainingLogger('runs/training.csv', is_detection=True) as logger:
+    for epoch in range(epochs):
+        train_metrics = train_one_epoch(model, train_loader, optimizer, device, epoch+1, nc=2)
+        val_metrics = validate(model, val_loader, device, nc=2)
 
-# Print results
-print_comparison_results(results)
+        print_metrics(train_metrics, val_metrics, is_detection=True)
+        logger.write_epoch(epoch+1, epoch_time, lr, train_metrics, val_metrics)
+
+# Plot training curves after training
+plot_training_curves('runs/training.csv', save_dir='runs')
 ```
 
 ## Important Implementation Notes
@@ -226,6 +214,17 @@ When adding a new model, create a corresponding test file in `tests/`:
 
 Export the model class in `models/__init__.py`.
 
+## Module Organization Principles
+
+- **engine/** - Training engine core logic only (training loops, validation)
+- **utils/** - General utilities (logging, plotting, metrics, data loading)
+- **models/** - Neural network components
+
+When adding new code:
+- If it's training/validation logic → `engine/`
+- If it's a utility (logging, metrics, plotting) → `utils/`
+- If it's a network component → `models/`
+
 ## Git Commit Conventions
 
 所有提交使用中文，遵循 **Conventional Commits** 格式：
@@ -259,10 +258,10 @@ feat: 添加坐标注意力可视化
 
 **多文件变更**（需要正文）：
 ```
-refactor: 重构注意力模块代码结构
+refactor: 重构训练模块代码结构
 
-- 将 att.py 拆分为基础模块和可视化模块
-- 新建 att_visualize.py 存放带可视化功能的注意力模块
-- 新建 yolo_att.py 存放 YOLO 检测器
-- 更新 models/__init__.py 导入路径
+- 将 train.py 拆分为主训练流程和核心训练逻辑
+- 新建 training.py 存放核心 epoch 训练函数
+- 将日志、绘图、指标模块移至 utils/
+- 更新所有相关文件的导入路径
 ```

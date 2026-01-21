@@ -98,13 +98,21 @@ ai-playground/
 │   ├── bifpn.py            # BiFPN 特征融合
 │   ├── conv.py             # 自定义卷积层 (Conv+BN+SiLU)
 │   └── ...
-├── engine/                 # 训练和可视化引擎
-│   ├── detector.py         # YOLO 检测训练
-│   ├── train.py            # 训练主循环
+├── engine/                 # 训练引擎核心
+│   ├── train.py            # 主训练流程
+│   ├── training.py         # 核心 epoch 训练逻辑
 │   ├── validate.py         # 验证函数
+│   ├── detector.py         # YOLO 检测训练
+│   ├── classifier.py       # 分类任务训练
 │   ├── visualize.py        # 注意力可视化函数
-│   └── comparison.py       # 模型对比训练
-├── utils/                  # 数据加载工具
+│   ├── comparison.py       # 模型对比训练
+│   └── simple.py           # 简单/遗留训练函数
+├── utils/                  # 通用工具模块
+│   ├── load.py             # 数据加载
+│   ├── logger.py           # CSV 训练日志
+│   ├── curves.py           # 训练曲线绘制
+│   ├── metrics.py          # 评估指标计算
+│   └── model_summary.py    # 模型信息展示
 ├── tests/                  # 单元测试
 ├── visualization/          # 训练入口脚本
 ├── scripts/                # 测试脚本
@@ -119,18 +127,22 @@ ai-playground/
 
 ```python
 from models import YOLOCoordAttDetector
-from engine import train_detector, visualize_detection_attention
-from utils import create_dataloaders
+from engine import train
 
-# 创建模型
+# 创建模型并训练
 model = YOLOCoordAttDetector(nc=2)  # 2 个类别
 
-# 训练
-train_loader, val_loader, _ = create_dataloaders('datasets/MY_TEST_DATA/data.yaml')
-train_detector(model, train_loader, val_loader, epochs=100, lr=0.001, device='cuda')
-
-# 可视化
-visualize_detection_attention(model, val_loader, device, save_path='attention.png')
+# 训练（包含 CSV 日志、曲线绘制、模型信息输出）
+train(
+    model,
+    config_path='datasets/MY_TEST_DATA/data.yaml',
+    epochs=100,
+    batch_size=16,
+    img_size=640,
+    lr=0.001,
+    device='cuda',
+    save_dir='runs/train'
+)
 ```
 
 ### YOLO + CoordCrossAtt 检测器
@@ -145,7 +157,7 @@ model = YOLOCoordCrossAttDetector(nc=2, num_heads=1)
 ### BiFPN 多尺度特征融合
 
 ```python
-from models import BiFPN_Cat
+from modules import BiFPN_Cat
 
 # 融合不同通道的特征图
 feat1 = torch.randn(1, 128, 40, 40)
@@ -186,6 +198,15 @@ names:
   1: square
 ```
 
+## 训练输出
+
+训练过程会自动记录和保存：
+
+- **CSV 日志** (`training_log.csv`) - 每个 epoch 的 loss、accuracy/mAP、学习率、时间
+- **训练曲线** (`training_curves.png`) - Loss、指标、学习率、时间曲线
+- **模型权重** (`best.pt`, `last.pt`) - 最佳和最后一个 epoch 的权重
+- **模型摘要** - 训练前自动输出层数、参数量、FLOPs
+
 ## 开发状态
 
 | 模块 | 状态 |
@@ -195,6 +216,8 @@ names:
 | CoordAtt | ✅ 完成 |
 | CoordCrossAtt | ✅ 完成 |
 | 训练引擎 | ✅ 完成 |
+| CSV 日志 | ✅ 完成 |
+| 曲线绘制 | ✅ 完成 |
 | 可视化工具 | ✅ 完成 |
 | 模型对比 | ✅ 完成 |
 
@@ -205,6 +228,7 @@ names:
 - **检测注意力** - 显示模型在检测时关注的位置
 - **注意力对比** - 对比 CoordAtt 和 CoordCrossAtt 的注意力分布
 - **相关性矩阵** - 展示水平和垂直位置之间的关联
+- **训练曲线** - Loss、准确率/mAP、学习率变化趋势
 
 ## 许可证
 
