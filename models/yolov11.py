@@ -3,8 +3,8 @@ import torch.nn as nn
 
 from modules.conv import Conv, Concat
 from modules.block import C3k2, SPPF, C2PSA
-from modules.head import Detect
-from modules.yolo_loss import YOLOLoss
+from modules.head import Detect, DetectAnchorFree
+from modules.yolo_loss import YOLOLoss, YOLOLossAnchorFree
 from utils import make_divisible, compute_channels, compute_depth
 
 
@@ -69,13 +69,8 @@ class YOLOv11(nn.Module):
         self.width_multiple = width_multiple
         self.max_channels = max_channels
 
-        # Default anchors (same as YOLOv3 for compatibility)
-        if anchors is None:
-            anchors = [
-                [10, 13, 16, 30, 33, 23],      # P3/8
-                [30, 61, 62, 45, 59, 119],     # P4/16
-                [116, 90, 156, 198, 373, 326]  # P5/32
-            ]
+        # Anchor-free: no anchors needed
+        self.anchors = None  # Not used in anchor-free version
 
         # ===== Backbone =====
         # Channel calculations with width scaling
@@ -161,16 +156,20 @@ class YOLOv11(nn.Module):
         self.c3k2_22 = C3k2(c4 + c5, c5, n2, c3k=True)
 
         # ===== Detection Head =====
-        # [[16, 19, 22], 1, Detect, [nc]]  # Detect(P3, P4, P5)
-        # Use Detect layer for compatibility with YOLOLoss
-        self.detect = Detect(nc=nc, anchors=anchors, ch=(c3, c4, c5))
+        # Anchor-free detection head (like YOLOv8/v11)
+        # [[16, 19, 22], 1, DetectAnchorFree, [nc]]
+        self.detect = DetectAnchorFree(nc=nc, reg_max=32, ch=(c3, c4, c5))
 
-        # Loss function
-        self.loss_fn = YOLOLoss(
+        # Initialize biases following ultralytics formula
+        # This is CRITICAL for proper initial loss values
+        self.detect.initialize_biases(img_size=img_size)
+
+        # Anchor-free loss function with DFL
+        self.loss_fn = YOLOLossAnchorFree(
             num_classes=nc,
-            anchors=anchors,
+            reg_max=32,
             img_size=img_size,
-            use_wiou=True
+            use_dfl=True
         )
 
     def forward(self, x: torch.Tensor, targets=None):
@@ -183,8 +182,8 @@ class YOLOv11(nn.Module):
                      [batch_idx, class_id, x_center, y_center, width, height]
 
         Returns:
-            If targets is None: predictions
-            If targets is provided: {'predictions': predictions, 'loss': loss}
+            If targets is None: predictions (inference mode)
+            If targets is provided: dict with 'predictions' and 'loss'
         """
         # ===== Backbone =====
         x = self.conv0(x)           # 0
@@ -227,7 +226,9 @@ class YOLOv11(nn.Module):
 
         # If targets provided, compute loss
         if targets is not None:
-            loss = self.loss_fn(predictions, targets)
-            return {'predictions': predictions, 'loss': loss}
+            # Anchor-free: predictions is {'cls': [...], 'reg': [...]}
+            # loss_fn returns (loss * batch_size, loss.detach()) following ultralytics format
+            loss_for_backward, loss_items = self.loss_fn(predictions, targets)
+            return loss_for_backward, loss_items, predictions
 
         return predictions

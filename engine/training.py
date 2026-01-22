@@ -19,10 +19,15 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
         nc: 类别数量（用于计算准确率）
 
     Returns:
-        dict: 包含 loss, accuracy/mAP 等指标的字典
+        dict: 包含 loss, box_loss, cls_loss, dfl_loss, accuracy/mAP 等指标的字典
     """
     model.train()
     total_loss = 0
+    # 损失分量累计（用于检测任务）
+    total_box_loss = 0.0
+    total_cls_loss = 0.0
+    total_dfl_loss = 0.0
+    # 分类任务统计
     correct = 0
     total = 0
 
@@ -34,9 +39,19 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
         optimizer.zero_grad()
 
         # 尝试不同的调用方式
+        loss_items = None  # Track loss_items for printing
         try:
-            # 方式1: 模型接受 targets 参数
+            # 方式1: 模型接受 targets 参数，返回 (loss, loss_items, predictions)
             outputs = model(imgs, targets)
+            # Check if outputs is tuple/list with 3 elements (new ultralytics-style format)
+            if isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
+                loss_for_backward = outputs[0]
+                loss_items = outputs[1]
+                predictions = outputs[2] if len(outputs) > 2 else None
+                # loss_items contains [box_loss, cls_loss, dfl_loss] (not multiplied by batch_size)
+                loss = loss_for_backward
+            else:
+                raise TypeError("Unexpected output format")
         except TypeError:
             # 方式2: 模型不接受 targets 参数
             outputs = model(imgs)
@@ -49,29 +64,36 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
                 print("警告: 模型没有 compute_loss 方法，使用占位 loss")
                 loss = torch.tensor(1.0, device=device, requires_grad=True)
                 outputs = {'loss': loss}
-
-        # 获取 loss
-        if isinstance(outputs, dict):
-            loss = outputs.get('loss', None)
+            loss = outputs.get('loss', loss)
             predictions = outputs.get('predictions', outputs)
-            if loss is None:
-                raise ValueError("无法获取 loss，请检查模型实现")
-        elif isinstance(outputs, (tuple, list)):
-            loss = outputs[-1]
-            predictions = outputs[0]
-        else:
-            loss = outputs
-            predictions = outputs
 
         # 确保 loss 是标量
         if hasattr(loss, 'dim') and loss.dim() > 0:
-            loss = loss.mean()
+            loss = loss.sum()
 
         # 反向传播
         loss.backward()
+
+        # 梯度裁剪，防止梯度爆炸
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+
         optimizer.step()
 
-        total_loss += loss.item()
+        # Use loss_items for printing (not multiplied by batch_size)
+        if loss_items is not None:
+            # loss_items: [box_loss, cls_loss, dfl_loss]
+            box_loss = loss_items[0].item()
+            cls_loss = loss_items[1].item()
+            dfl_loss = loss_items[2].item()
+            current_loss = box_loss + cls_loss + dfl_loss
+            # 累计损失分量
+            total_box_loss += box_loss
+            total_cls_loss += cls_loss
+            total_dfl_loss += dfl_loss
+        else:
+            current_loss = loss.item()
+
+        total_loss += current_loss
 
         # 收集预测用于指标计算
         is_detection = hasattr(model, 'detect')
@@ -90,14 +112,25 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
                 correct += (predicted == targets).sum().item()
 
         if batch_idx % 10 == 0:
-            print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] Loss: {loss.item():.4f}")
+            if loss_items is not None:
+                # 打印各损失分量
+                print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] "
+                      f"Loss: {current_loss:.4f} (box: {box_loss:.4f}, cls: {cls_loss:.4f}, dfl: {dfl_loss:.4f})")
+            else:
+                print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] Loss: {loss.item():.4f}")
 
-    metrics = {'loss': total_loss / len(dataloader)}
+    num_batches = len(dataloader)
+    metrics = {
+        'loss': total_loss / num_batches,
+    }
 
     # 添加额外指标
     if hasattr(model, 'detect'):
-        # 检测任务：训练时不计算 mAP（计算成本高），返回占位符
-        metrics['mAP'] = -1.0  # -1 表示未计算
+        # 检测任务：添加损失分量
+        metrics['box_loss'] = total_box_loss / num_batches
+        metrics['cls_loss'] = total_cls_loss / num_batches
+        metrics['dfl_loss'] = total_dfl_loss / num_batches
+        metrics['mAP'] = -1.0  # -1 表示未计算（训练时不计算 mAP）
     else:
         # 分类任务：计算准确率
         if nc is not None:
@@ -114,32 +147,41 @@ def print_metrics(train_metrics: Dict[str, float], val_metrics: Dict[str, float]
         val_metrics: 验证集指标
         is_detection: 是否为检测任务
     """
-    print(f"Train Loss: {train_metrics['loss']:.4f}", end='')
-
-    # 打印训练集额外指标
     if is_detection:
-        # 检测任务
-        if 'mAP' in train_metrics and train_metrics['mAP'] >= 0:
+        # 检测任务：打印各损失分量
+        print(f"Train - Loss: {train_metrics['loss']:.4f}", end='')
+        if 'box_loss' in train_metrics:
+            print(f" (box: {train_metrics['box_loss']:.4f}, "
+                  f"cls: {train_metrics['cls_loss']:.4f}, "
+                  f"dfl: {train_metrics['dfl_loss']:.4f})", end='')
+        if 'mAP50' in train_metrics and train_metrics['mAP50'] >= 0:
+            print(f" | mAP50: {train_metrics['mAP50']*100:.2f}%", end='')
+        elif 'mAP' in train_metrics and train_metrics['mAP'] >= 0:
             print(f" | mAP: {train_metrics['mAP']*100:.2f}%", end='')
         else:
             print(f" | mAP: N/A", end='')
-    else:
-        # 分类任务
-        if 'accuracy' in train_metrics:
-            print(f" | Acc: {train_metrics['accuracy']*100:.2f}%", end='')
-    print()
+        print()
 
-    print(f"Val Loss: {val_metrics['loss']:.4f}", end='')
-
-    # 打印验证集额外指标
-    if is_detection:
-        # 检测任务
-        if 'mAP' in val_metrics and val_metrics['mAP'] >= 0:
+        print(f"Val   - Loss: {val_metrics['loss']:.4f}", end='')
+        if 'box_loss' in val_metrics:
+            print(f" (box: {val_metrics['box_loss']:.4f}, "
+                  f"cls: {val_metrics['cls_loss']:.4f}, "
+                  f"dfl: {val_metrics['dfl_loss']:.4f})", end='')
+        if 'mAP50' in val_metrics and val_metrics['mAP50'] >= 0:
+            print(f" | mAP50: {val_metrics['mAP50']*100:.2f}%", end='')
+        elif 'mAP' in val_metrics and val_metrics['mAP'] >= 0:
             print(f" | mAP: {val_metrics['mAP']*100:.2f}%", end='')
         else:
             print(f" | mAP: N/A", end='')
+        print()
     else:
         # 分类任务
+        print(f"Train Loss: {train_metrics['loss']:.4f}", end='')
+        if 'accuracy' in train_metrics:
+            print(f" | Acc: {train_metrics['accuracy']*100:.2f}%", end='')
+        print()
+
+        print(f"Val Loss: {val_metrics['loss']:.4f}", end='')
         if 'accuracy' in val_metrics:
             print(f" | Acc: {val_metrics['accuracy']*100:.2f}%", end='')
-    print()
+        print()

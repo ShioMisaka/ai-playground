@@ -13,6 +13,9 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
     """训练一个 epoch"""
     model.train()
     total_loss = 0
+    total_bbox_loss = 0
+    total_cls_loss = 0
+    total_dfl_loss = 0
 
     for batch_idx, (imgs, targets, paths) in enumerate(dataloader):
         imgs = imgs.to(device)
@@ -22,11 +25,24 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
         optimizer.zero_grad()
         outputs = model(imgs, targets)
 
-        # 获取 loss
+        # 获取 loss (支持新旧格式)
         if isinstance(outputs, dict):
-            loss = outputs.get('loss', None)
-            if loss is None:
+            loss_dict = outputs.get('loss', None)
+            if loss_dict is None:
                 raise ValueError("模型输出未包含 loss")
+
+            # 新格式: loss 是 dict {'loss': ..., 'bbox_loss': ..., 'cls_loss': ..., 'dfl_loss': ...}
+            if isinstance(loss_dict, dict):
+                loss = loss_dict['loss']
+                bbox_loss = loss_dict.get('bbox_loss', 0)
+                cls_loss = loss_dict.get('cls_loss', 0)
+                dfl_loss = loss_dict.get('dfl_loss', 0)
+                total_bbox_loss += (bbox_loss.item() if torch.is_tensor(bbox_loss) else bbox_loss)
+                total_cls_loss += (cls_loss.item() if torch.is_tensor(cls_loss) else cls_loss)
+                total_dfl_loss += (dfl_loss.item() if torch.is_tensor(dfl_loss) else dfl_loss)
+            else:
+                # 旧格式: loss 是标量
+                loss = loss_dict
         elif isinstance(outputs, (tuple, list)):
             loss = outputs[-1]
         else:
@@ -45,13 +61,21 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
         if batch_idx % 10 == 0:
             print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] Loss: {loss.item():.4f}")
 
-    return total_loss / len(dataloader)
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss, {
+        'bbox_loss': total_bbox_loss / len(dataloader),
+        'cls_loss': total_cls_loss / len(dataloader),
+        'dfl_loss': total_dfl_loss / len(dataloader),
+    }
 
 
 def validate(model, dataloader, device):
     """验证模型"""
     model.eval()
     total_loss = 0
+    total_bbox_loss = 0
+    total_cls_loss = 0
+    total_dfl_loss = 0
 
     with torch.no_grad():
         for imgs, targets, paths in dataloader:
@@ -74,11 +98,23 @@ def validate(model, dataloader, device):
             if hasattr(model, 'detect'):
                 model.detect.eval()
 
-            # 获取 loss
+            # 获取 loss (支持新旧格式)
             if isinstance(outputs, dict):
-                loss = outputs.get('loss', None)
-                if loss is None:
+                loss_dict = outputs.get('loss', None)
+                if loss_dict is None:
                     raise ValueError("模型输出未包含 loss")
+
+                # 新格式: loss 是 dict
+                if isinstance(loss_dict, dict):
+                    loss = loss_dict['loss']
+                    bbox_loss = loss_dict.get('bbox_loss', 0)
+                    cls_loss = loss_dict.get('cls_loss', 0)
+                    dfl_loss = loss_dict.get('dfl_loss', 0)
+                    total_bbox_loss += (bbox_loss.item() if torch.is_tensor(bbox_loss) else bbox_loss)
+                    total_cls_loss += (cls_loss.item() if torch.is_tensor(cls_loss) else cls_loss)
+                    total_dfl_loss += (dfl_loss.item() if torch.is_tensor(dfl_loss) else dfl_loss)
+                else:
+                    loss = loss_dict
             elif isinstance(outputs, (tuple, list)):
                 loss = outputs[-1]
             else:
@@ -90,7 +126,12 @@ def validate(model, dataloader, device):
 
             total_loss += loss.item()
 
-    return total_loss / len(dataloader)
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss, {
+        'bbox_loss': total_bbox_loss / len(dataloader),
+        'cls_loss': total_cls_loss / len(dataloader),
+        'dfl_loss': total_dfl_loss / len(dataloader),
+    }
 
 
 def train_detector(model, train_loader, val_loader, epochs=100, lr=0.001,
@@ -157,13 +198,13 @@ def train_detector(model, train_loader, val_loader, epochs=100, lr=0.001,
     for epoch in range(epochs):
         epoch_start_time = time.time()
 
-        train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch+1)
+        train_loss, train_components = train_one_epoch(model, train_loader, optimizer, device, epoch+1)
 
         # 定期清理内存
         if device.type == 'cuda':
             torch.cuda.empty_cache()
 
-        val_loss = validate(model, val_loader, device)
+        val_loss, val_components = validate(model, val_loader, device)
 
         # 清理内存
         if device.type == 'cuda':
@@ -175,8 +216,13 @@ def train_detector(model, train_loader, val_loader, epochs=100, lr=0.001,
         epoch_time = time.time() - epoch_start_time
         current_lr = float(optimizer.param_groups[0]['lr'])  # 确保是 Python float
 
+        # 打印详细信息（如果有loss components）
+        bbox_msg = f" | Box: {train_components['bbox_loss']:.4f}" if train_components['bbox_loss'] > 0 else ""
+        cls_msg = f" | Cls: {train_components['cls_loss']:.4f}" if train_components['cls_loss'] > 0 else ""
+        dfl_msg = f" | DFL: {train_components['dfl_loss']:.4f}" if train_components['dfl_loss'] > 0 else ""
+
         print(f"\nEpoch [{epoch+1}/{epochs}] "
-              f"Train Loss: {train_loss:.4f} | "
+              f"Train Loss: {train_loss:.4f}{bbox_msg}{cls_msg}{dfl_msg} | "
               f"Val Loss: {val_loss:.4f} | "
               f"LR: {current_lr:.6f} | "
               f"Time: {epoch_time:.2f}s")

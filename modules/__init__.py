@@ -27,8 +27,8 @@ from .block import (
     )
 
 # YOLO 检测头和损失
-from .head import Detect
-from .yolo_loss import YOLOLoss
+from .head import Detect, DetectAnchorFree
+from .yolo_loss import YOLOLoss, YOLOLossAnchorFree
 
 __all__ = [
     # BiFPN
@@ -58,4 +58,6 @@ __all__ = [
     # YOLO 组件
     'Detect',
     'YOLOLoss',
+    'DetectAnchorFree',
+    'YOLOLossAnchorFree',
 ]

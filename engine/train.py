@@ -125,7 +125,7 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
                 torch.cuda.empty_cache()
 
             # 验证
-            val_metrics = validate(model, val_loader, device, nc=nc)
+            val_metrics = validate(model, val_loader, device, nc=nc, img_size=img_size)
 
             # 清理内存
             if device.type == 'cuda':

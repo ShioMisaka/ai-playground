@@ -31,7 +31,12 @@ class TrainingLogger:
         """获取 CSV 字段名"""
         base_fields = ['epoch', 'time', 'lr', 'train_loss', 'val_loss']
         if self.is_detection:
-            base_fields.extend(['train_map', 'val_map'])
+            # 检测任务：添加损失分量和 mAP50
+            base_fields.extend([
+                'train_box_loss', 'train_cls_loss', 'train_dfl_loss',
+                'val_box_loss', 'val_cls_loss', 'val_dfl_loss',
+                'val_map50'
+            ])
         else:
             base_fields.extend(['train_accuracy', 'val_accuracy'])
         return base_fields
@@ -53,7 +58,7 @@ class TrainingLogger:
             epoch: 当前 epoch
             epoch_time: epoch 耗时（秒）
             lr: 学习率
-            train_metrics: 训练集指标 {'loss': ..., 'accuracy': ... 或 'mAP': ...}
+            train_metrics: 训练集指标 {'loss': ..., 'box_loss': ..., 'cls_loss': ..., 'dfl_loss': ..., 'mAP50': ...}
             val_metrics: 验证集指标
         """
         if self._writer is None:
@@ -68,11 +73,18 @@ class TrainingLogger:
         }
 
         if self.is_detection:
-            # 检测任务：mAP（-1 表示未计算，写入为空字符串）
-            train_map = train_metrics.get('mAP', -1)
-            val_map = val_metrics.get('mAP', -1)
-            row['train_map'] = f'{train_map:.4f}' if train_map >= 0 else ''
-            row['val_map'] = f'{val_map:.4f}' if val_map >= 0 else ''
+            # 检测任务：损失分量和 mAP50
+            row['train_box_loss'] = f'{train_metrics.get("box_loss", 0):.4f}'
+            row['train_cls_loss'] = f'{train_metrics.get("cls_loss", 0):.4f}'
+            row['train_dfl_loss'] = f'{train_metrics.get("dfl_loss", 0):.4f}'
+
+            row['val_box_loss'] = f'{val_metrics.get("box_loss", 0):.4f}'
+            row['val_cls_loss'] = f'{val_metrics.get("cls_loss", 0):.4f}'
+            row['val_dfl_loss'] = f'{val_metrics.get("dfl_loss", 0):.4f}'
+
+            # mAP50（如果存在）
+            map50 = val_metrics.get('mAP50', 0)
+            row['val_map50'] = f'{map50:.4f}' if map50 >= 0 else ''
         else:
             # 分类任务：accuracy
             row['train_accuracy'] = f'{train_metrics.get("accuracy", 0):.4f}'
