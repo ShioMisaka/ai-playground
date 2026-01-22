@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AI Playground - a PyTorch-based computer vision research project focused on:
 - **YOLOv3** object detection implementation
+- **YOLOv11** anchor-free object detection with DFL and Task-Aligned Learning
 - **Coordinate Attention (CoordAtt)** - Captures long-range spatial dependencies along horizontal and vertical directions
 - **Coordinate Cross Attention (CoordCrossAtt)** - Cross-attention mechanism for H-W feature interaction
 - **BiFPN** with learnable fusion weights
@@ -21,7 +22,29 @@ conda activate torch_cpu
 
 ## Running Scripts
 
-### Training + Visualization
+### Training YOLOv11 (Recommended)
+
+```bash
+# Train YOLOv11 with anchor-free detection
+python -c "
+from models import YOLOv11
+from engine import train
+
+model = YOLOv11(nc=2, scale='n')
+train(
+    model,
+    config_path='datasets/MY_TEST_DATA/data.yaml',
+    epochs=100,
+    batch_size=16,
+    img_size=640,
+    lr=0.001,
+    device='cuda',
+    save_dir='runs/train'
+)
+"
+```
+
+### Training + Visualization (Legacy)
 
 ```bash
 # Train YOLO + CoordAtt detector
@@ -66,30 +89,30 @@ python visualization/visualize_coordatt.py
 - `att_visualize.py` - Attention with visualization hooks
 - `yolo_att.py` - YOLO detectors: `YOLOCoordAttDetector`, `YOLOCoordCrossAttDetector`
 - `yolov3.py` - YOLOv3 with Darknet-53 backbone
-- `yolo_loss.py` - YOLO loss function (supports WIoU v3)
+- `yolov11.py` - YOLOv11 anchor-free architecture with DFL
+- `yolo_loss.py` - YOLO loss functions (supports WIoU v3, Anchor-Free with DFL)
 - `bifpn.py` - `BiFPN_Cat` for multi-scale feature fusion
 - `conv.py` - `Conv` wrapper (Conv2d + BatchNorm + SiLU)
-- `head.py` - `Detect` detection head for YOLO
+- `head.py` - `Detect`, `DetectAnchorFree` detection heads
+- `block.py` - C3k2, SPPF, C2PSA building blocks
 
 ### engine/ - Training Engine Core
 
 **Core training modules:**
-- `train.py` - Main training flow (`train()`, ~160 lines)
+- `train.py` - Main training flow (`train()`)
 - `training.py` - Core epoch training logic (`train_one_epoch()`, `print_metrics()`)
-- `validate.py` - Validation logic (`validate()`, `evaluate()`, `test()`)
-- `simple.py` - Simple/legacy training functions (`train_fc()`)
-- `classifier.py` - Classification-specific training
+- `validate.py` - Validation logic with mAP50 (`validate()`, `evaluate()`, `test()`)
 - `detector.py` - Detection-specific training
-- `comparison.py` - Model comparison training
+- `classifier.py` - Classification-specific training
 - `visualize.py` - All visualization functions
 
 ### utils/ - Utility Modules
 
 **Utility modules:**
 - `load.py` - Data loading utilities (`create_dataloaders()`)
-- `logger.py` - CSV training logger (`TrainingLogger`)
+- `logger.py` - CSV training logger with loss components (`TrainingLogger`)
 - `curves.py` - Training curve plotting (`plot_training_curves()`)
-- `metrics.py` - Evaluation metrics (`compute_*_metrics()`, `format_metrics()`)
+- `metrics.py` - Evaluation metrics including mAP50 (`compute_map50()`, `compute_*_metrics()`)
 - `model_summary.py` - Model/training info display (`print_training_info()`, `print_model_summary()`)
 
 ### Directory Structure
@@ -101,11 +124,39 @@ utils/          # Utility modules (logging, plotting, metrics)
 tests/          # Unit tests for individual modules
 visualization/  # Training entry scripts
 scripts/        # Testing scripts (no training)
+demos/          # Quick demo scripts
 datasets/       # YOLO-format datasets
 outputs/        # Generated outputs (models, images, logs)
 ```
 
 ## Code Patterns
+
+### YOLOv11 Model (Recommended)
+
+```python
+from models import YOLOv11
+from engine import train
+
+# Create model with dynamic scaling
+model = YOLOv11(
+    nc=2,           # number of classes
+    scale='n',      # n/s/m/l/x for nano/small/medium/large/xlarge
+    reg_max=32,     # DFL distribution bins
+    img_size=640
+)
+
+# Train (includes CSV logging with loss components, curve plotting, mAP50)
+train(
+    model,
+    config_path='datasets/MY_TEST_DATA/data.yaml',
+    epochs=100,
+    batch_size=16,
+    img_size=640,
+    lr=0.001,
+    device='cuda',
+    save_dir='runs/train'
+)
+```
 
 ### Custom Conv Wrapper
 
@@ -126,23 +177,15 @@ bifpn = BiFPN_Cat(c1=[128, 256, 512])
 out = bifpn([feat1, feat2, feat3])  # Shape: (1, 512, 40, 40)
 ```
 
-### Coordinate Attention (Basic)
-
-```python
-from modules import CoordAtt
-att = CoordAtt(inp=256, oup=256, reduction=32)
-out = att(x)  # Same shape as input, attention-weighted
-```
-
 ### Training a Model
 
 ```python
-from models import YOLOCoordAttDetector
+from models import YOLOv11
 from engine import train
 from utils import create_dataloaders
 
 # Create model
-model = YOLOCoordAttDetector(nc=2)
+model = YOLOv11(nc=2, scale='s')
 
 # Train (includes CSV logging, curve plotting, model summary)
 train(
@@ -170,7 +213,7 @@ print_model_summary(model, img_size=640, nc=2)
 with TrainingLogger('runs/training.csv', is_detection=True) as logger:
     for epoch in range(epochs):
         train_metrics = train_one_epoch(model, train_loader, optimizer, device, epoch+1, nc=2)
-        val_metrics = validate(model, val_loader, device, nc=2)
+        val_metrics = validate(model, val_loader, device, nc=2, img_size=640)
 
         print_metrics(train_metrics, val_metrics, is_detection=True)
         logger.write_epoch(epoch+1, epoch_time, lr, train_metrics, val_metrics)
@@ -181,19 +224,25 @@ plot_training_curves('runs/training.csv', save_dir='runs')
 
 ## Important Implementation Notes
 
+### YOLOv11 Loss Format
+
+YOLOv11 returns loss in ultralytics-style format:
+- Returns `(loss * batch_size, loss_items, predictions)` where:
+  - `loss * batch_size`: scalar for backward pass
+  - `loss_items`: tensor `[box_loss, cls_loss, dfl_loss]` (not multiplied by batch_size)
+  - `predictions`: dict with `{'cls': [...], 'reg': [...]}`
+
 ### Detection Training Mode Handling
 
-When using YOLO's `Detect` head, it returns different formats based on training mode:
-- **Training mode** (`model.training=True`): Returns list of predictions for loss computation
-- **Inference mode** (`model.eval()`): Returns tuple `(concatenated, list)` for NMS/post-processing
+When using YOLO's detection head, different modes:
+- **YOLOv3 Detect** (anchor-based):
+  - Training mode: Returns list for loss computation
+  - Inference mode: Returns tuple for NMS
+- **DetectAnchorFree** (anchor-free):
+  - Training mode: Returns `{'cls': [...], 'reg': [...]}`
+  - Inference mode: Returns `(concatenated, dict)`
 
-The `engine/detector.py` `validate()` function temporarily sets `model.detect.train()` during validation.
-
-### Stride Alignment
-
-The `YOLOCoordAttDetector` backbone produces feature maps at strides 4/8/16/32, but the Detect head expects inputs at strides 8/16/32. Therefore:
-- Use `p4` (stride 8), `p5` (stride 16), `p6_backbone` (stride 32) for detection
-- The FPN neck fuses features but maintains correct stride alignment
+The `engine/validate.py` temporarily switches `model.detect.eval()` for inference predictions during validation.
 
 ### JSON Serialization
 
