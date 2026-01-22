@@ -14,7 +14,17 @@ from .att_visualize import (
 
 # 基础卷积和块模块
 from .conv import Conv, Concat
-from .block import Bottleneck
+from .block import (
+    Bottleneck,
+    C2f,
+    C3,
+    C3k,
+    C3k2,
+    SPPF,
+    Attention,
+    PSABlock,
+    C2PSA,
+    )
 
 # YOLO 检测头和损失
 from .head import Detect
@@ -36,6 +46,14 @@ __all__ = [
     'Conv',
     'Concat',
     'Bottleneck',
+    "C2f",
+    "C3",
+    "C3k",
+    "C3k2",
+    "SPPF",
+    "Attention",
+    "PSABlock",
+    "C2PSA",
 
     # YOLO 组件
     'Detect',
