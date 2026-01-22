@@ -32,6 +32,9 @@ from .lightweight_compare import (
 # YOLOv3 模型
 from .yolov3 import YOLOv3
 
+# YOLOv11 模型
+from .yolov11 import YOLOv11
+
 __all__ = [
     # BiFPN (from modules)
     'BiFPN_Cat',
@@ -60,4 +63,5 @@ __all__ = [
     'Detect',
     'YOLOLoss',
     'YOLOv3',
+    'YOLOv11',
 ]
