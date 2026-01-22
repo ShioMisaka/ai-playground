@@ -5,6 +5,7 @@ from modules.conv import Conv, Concat
 from modules.block import C3k2, SPPF, C2PSA
 from modules.head import Detect
 from modules.yolo_loss import YOLOLoss
+from utils import make_divisible, compute_channels, compute_depth
 
 
 # Model scaling constants
@@ -15,41 +16,6 @@ YOLOV11_SCALES = {
     'l': [1.00, 1.00, 512],   # large: 357 layers, 25.4M params, 87.6 GFLOPs
     'x': [1.00, 1.50, 512],   # xlarge: 357 layers, 57.0M params, 196.0 GFLOPs
 }
-
-
-def make_divisible(x, divisor=8):
-    """Returns nearest x divisible by divisor."""
-    return int(round(x / divisor) * divisor)
-
-
-def compute_channels(channels, width_multiple, max_channels=None):
-    """Compute scaled number of channels.
-
-    Args:
-        channels: base number of channels
-        width_multiple: width scaling factor
-        max_channels: maximum number of channels (optional)
-
-    Returns:
-        Scaled number of channels
-    """
-    channels = make_divisible(channels * width_multiple)
-    if max_channels is not None:
-        channels = min(channels, max_channels)
-    return channels
-
-
-def compute_depth(n, depth_multiple):
-    """Compute scaled number of layers/repeats.
-
-    Args:
-        n: base number of layers
-        depth_multiple: depth scaling factor
-
-    Returns:
-        Scaled number of layers (at least 1)
-    """
-    return max(round(n * depth_multiple), 1) if n > 1 else n
 
 
 class YOLOv11(nn.Module):

@@ -5,6 +5,7 @@ from modules.conv import Conv, Concat
 from modules.block import Bottleneck
 from modules.head import Detect
 from modules.yolo_loss import YOLOLoss
+from utils import make_divisible, compute_channels, compute_depth
 
 
 # Model scaling constants for YOLOv3
@@ -15,43 +16,6 @@ YOLOV3_SCALES = {
     'l': [1.00, 1.00, 512],   # large version (full YOLOv3)
     'x': [1.00, 1.25, 512],   # xlarge version
 }
-
-
-def make_divisible(x, divisor=8):
-    """Returns nearest x divisible by divisor."""
-    return int(round(x / divisor) * divisor)
-
-
-def compute_channels(channels, width_multiple, max_channels=None):
-    """Compute scaled number of channels.
-
-    Args:
-        channels: base number of channels
-        width_multiple: width scaling factor
-        max_channels: maximum number of channels (optional)
-
-    Returns:
-        Scaled number of channels
-    """
-    channels = make_divisible(channels * width_multiple)
-    if max_channels is not None:
-        channels = min(channels, max_channels)
-    return int(max(channels, 8))  # Ensure at least 8 channels
-
-
-def compute_depth(n, depth_multiple):
-    """Compute scaled number of layers/repeats.
-
-    Args:
-        n: base number of layers
-        depth_multiple: depth scaling factor
-
-    Returns:
-        Scaled number of layers (at least 1)
-    """
-    if n <= 1:
-        return n
-    return max(round(n * depth_multiple), 1)
 
 
 class YOLOv3(nn.Module):

@@ -1,5 +1,8 @@
 # utils/__init__.py
 
+# 模型缩放工具
+from .scaling import make_divisible, compute_channels, compute_depth
+
 # 数据加载
 from .load import get_data_loader, create_dataloaders
 
@@ -28,6 +31,11 @@ from .model_summary import (
 )
 
 __all__ = [
+    # 模型缩放工具
+    'make_divisible',
+    'compute_channels',
+    'compute_depth',
+
     # 数据加载
     'get_data_loader',
     'create_dataloaders',
