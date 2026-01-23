@@ -7,6 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AI Playground - a PyTorch-based computer vision research project focused on:
 - **YOLOv3** object detection implementation
 - **YOLOv11** anchor-free object detection with DFL and Task-Aligned Learning
+  - Per-scale bbox clamping for accurate multi-scale predictions
+  - Optimized loss weights (box: 7.5, cls: 0.5, dfl: 1.5)
+  - Improved DFL bias initialization for faster convergence
 - **Coordinate Attention (CoordAtt)** - Captures long-range spatial dependencies along horizontal and vertical directions
 - **Coordinate Cross Attention (CoordCrossAtt)** - Cross-attention mechanism for H-W feature interaction
 - **BiFPN** with learnable fusion weights
@@ -72,6 +75,16 @@ python scripts/test_attention.py --model outputs/best_model.pth --image test.jpg
 ```bash
 python tests/fpn_test.py    # Test BiFPN module
 python tests/att_test.py    # Test Attention modules
+```
+
+### Diagnostic Tools
+
+```bash
+# Diagnose training issues (data loading, labels, model predictions)
+python scripts/diagnose_training.py
+
+# Debug TaskAlignedAssigner and loss computation
+python scripts/debug_assigner.py
 ```
 
 ### Visualization Only (Untrained)
@@ -251,6 +264,56 @@ When saving training history to JSON, always convert PyTorch types to Python nat
 history['train_loss'].append(float(train_loss))
 history['lr'].append(float(optimizer.param_groups[0]['lr']))
 ```
+
+## Important Training Notes
+
+### YOLOv11 Training Parameters
+
+- **Learning Rate**: Use `lr=0.001` for stable training (higher values like 0.01 cause divergence)
+- **Warmup**: 3 epochs with linear warmup (lr increases from 0.00033 to 0.001)
+- **Loss Weights**: box=7.5, cls=0.5, dfl=1.5 (following ultralytics defaults)
+- **Batch Size**: 8-16 depending on GPU memory
+- **Image Size**: 640 (standard), can be adjusted based on dataset
+
+### Common Training Issues
+
+#### Box Loss Not Decreasing
+
+If `box_loss` remains high (>4.0) after several epochs:
+
+1. **Check learning rate**: Should be 0.001 or lower
+2. **Verify data loading**: Run `python scripts/diagnose_training.py` to check labels
+3. **Check initial predictions**: Run `python scripts/debug_assigner.py` to analyze IoU
+
+#### mAP50 Stays at 0%
+
+If `mAP50` remains 0.00% for more than 5 epochs:
+
+1. **Verify label format**: Class IDs must start from 0
+2. **Check bbox coordinates**: Should be normalized to [0, 1] in YOLO format
+3. **Review confidence threshold**: Default is 0.25 for NMS
+
+#### Loss Components Imbalanced
+
+Expected loss ranges during early training:
+- `box_loss`: 2.0-6.0 (should decrease steadily)
+- `cls_loss`: 0.5-5.0 (initially high, decreases as model learns)
+- `dfl_loss`: 1.0-6.0 (follows box_loss trend)
+
+### Model Initialization
+
+YOLOv11 uses special bias initialization:
+- **Classification bias**: Set to very low values (~-7.85) to reduce initial false positives
+- **Regression bias**: Set to -3.5 to align DFL predictions with target range [0-30]
+
+### Per-Scale Bbox Clamping
+
+The `_bbox_decode` function applies scale-specific clamping:
+- P3 (stride=8): max_grid=80
+- P4 (stride=16): max_grid=40
+- P5 (stride=32): max_grid=20
+
+This ensures accurate IoU computation across all scales.
 
 ## Testing New Components
 

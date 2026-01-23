@@ -64,6 +64,31 @@ python tests/fpn_test.py
 python tests/att_test.py
 ```
 
+### 运行测试
+
+```bash
+# 测试 BiFPN 模块
+python tests/fpn_test.py
+
+# 测试 Coordinate Attention 模块
+python tests/att_test.py
+```
+
+### 诊断工具
+
+```bash
+# 诊断训练问题（数据加载、标签、模型预测）
+python scripts/diagnose_training.py
+
+# 调试 TaskAlignedAssigner 和损失计算
+python scripts/debug_assigner.py
+```
+
+这些工具会生成：
+- 可视化图片（保存到 `outputs/diagnosis/`）
+- 详细的训练信息输出
+- IoU 分析和损失分量统计
+
 ### 训练和可视化（传统方法）
 
 #### 1. 训练 YOLOv3
@@ -308,10 +333,51 @@ epoch,time,lr,train_loss,val_loss,train_box_loss,train_cls_loss,train_dfl_loss,v
 
 ### YOLOv11 训练优化
 
+- **Per-Scale Bbox Clamping** - 每个尺度使用正确的 grid size 进行 clamp
+  - P3 (stride=8): max=80
+  - P4 (stride=16): max=40
+  - P5 (stride=32): max=20
+- **优化的损失权重** - box: 7.5, cls: 0.5, dfl: 1.5 (与 ultralytics 一致)
+- **改进的 DFL 初始化** - regression bias=-3.5，使初始预测更接近目标范围
 - **损失分量跟踪** - 实时显示 box_loss、cls_loss、dfl_loss
 - **Task-Aligned Assignment** - 自动调整 topk=64, beta=2.0 获得更多正样本
 - **梯度裁剪** - max_norm=10.0 防止梯度爆炸
 - **IoU Loss 优化** - 使用普通 IoU 替代 CIoU 改善早期训练
+
+### 训练参数建议
+
+| 参数 | 推荐值 | 说明 |
+|------|--------|------|
+| 学习率 (lr) | 0.001 | 过高（如 0.01）会导致训练发散 |
+| Warmup epochs | 3 | 线性 warmup，从 0.00033 到 0.001 |
+| Batch size | 8-16 | 根据 GPU 内存调整 |
+| Image size | 640 | 标准输入尺寸 |
+| Epochs | 100-300 | 根据数据集大小调整 |
+
+### 常见训练问题排查
+
+#### Box Loss 不下降
+
+如果 `box_loss` 长期高于 4.0：
+
+1. **检查学习率**：应为 0.001 或更低
+2. **验证数据加载**：运行 `python scripts/diagnose_training.py` 检查标签
+3. **分析初始预测**：运行 `python scripts/debug_assigner.py` 查看 IoU
+
+#### mAP50 长期为 0%
+
+如果 `mAP50` 超过 5 个 epoch 仍为 0.00%：
+
+1. **验证标签格式**：类别 ID 必须从 0 开始
+2. **检查边界框坐标**：应归一化到 [0, 1]（YOLO 格式）
+3. **调整置信度阈值**：默认 NMS 阈值为 0.25
+
+#### 损失分量异常
+
+训练早期各损失分量的正常范围：
+- `box_loss`: 2.0-6.0（应稳定下降）
+- `cls_loss`: 0.5-5.0（初始较高，逐渐下降）
+- `dfl_loss`: 1.0-6.0（跟随 box_loss 趋势）
 
 ### 模型动态缩放
 
