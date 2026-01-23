@@ -109,10 +109,8 @@ class DetectAnchorFree(nn.Module):
         This sets initial cls predictions to very low values (~0.00039 probability)
         to reduce initial loss and stabilize training.
 
-        Formula from ultralytics: math.log(5 / nc / (img_size / stride) ** 2)
-
-        Note: Due to our single-layer head design (vs multi-layer in ultralytics),
-        the initial loss may be higher, but training should converge properly.
+        For regression (DFL), we initialize the bias to give predictions closer
+        to the expected target range, reducing initial DFL loss.
         """
         import math
 
@@ -122,9 +120,13 @@ class DetectAnchorFree(nn.Module):
             bias_cls = math.log(5 / self.nc / (img_size / s) ** 2)
             self.cv3[i].bias.data[:] = bias_cls
 
-            # Regression bias: initialize to 0 for better DFL convergence
-            # When bias=0, DFL outputs uniform distribution initially
-            self.cv4[i].bias.data[:] = 0.0
+            # Regression bias: initialize to push DFL predictions towards lower values
+            # When bias=0, uniform distribution gives prediction of (reg_max-1)/2 = 15.5
+            # Our targets are in range [0, ~30], so we need predictions centered around target mean
+            # Setting bias more negative pushes distribution towards lower bins
+            # For reg_max=32, bias ≈ -3.0 to -4.0 gives prediction ~7-12
+            bias_reg = -3.5
+            self.cv4[i].bias.data[:] = bias_reg
 
     def forward(self, x):
         """

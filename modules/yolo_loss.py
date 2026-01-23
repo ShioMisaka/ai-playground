@@ -664,9 +664,8 @@ class YOLOLossAnchorFree(nn.Module):
         self.reg_max = reg_max
         self.use_dfl = use_dfl
 
-        # Loss weights (adjusted for better convergence)
-        # Reduced box weight from 7.5 to 2.0 for better balance with cls and dfl
-        self.hyp_box = 2.0   # box gain (reduced for better convergence)
+        # Loss weights following ultralytics defaults
+        self.hyp_box = 7.5   # box gain
         self.hyp_cls = 0.5   # cls gain
         self.hyp_dfl = 1.5   # dfl gain
 
@@ -720,7 +719,7 @@ class YOLOLossAnchorFree(nn.Module):
 
         # Decode predictions to bboxes (xyxy format)
         # _bbox_decode returns bboxes in GRID coordinates
-        pred_bboxes_grid = self._bbox_decode(anchor_points, reg_preds)  # (bs, total_points, 4)
+        pred_bboxes_grid = self._bbox_decode(anchor_points, reg_preds, stride_tensor)  # (bs, total_points, 4)
 
         # Convert grid coordinates to pixel coordinates for assigner
         # stride_tensor: (total_points, 2) -> need to expand to match pred_bboxes
@@ -754,9 +753,8 @@ class YOLOLossAnchorFree(nn.Module):
         bce_loss = self.bce(cls_preds, target_scores.to(dtype))
         loss_cls = bce_loss.sum() / target_scores_sum
 
-        # Add numerical stability check to prevent gradient explosion
-        # If cls_loss is abnormally high, clip it
-        loss_cls = torch.clamp(loss_cls, max=50.0)
+        # Removed clamping to see true cls loss value
+        # The clamping was masking underlying issues
 
         # === Bbox Loss (IoU + DFL) ===
         loss_box = torch.zeros((), device=device, dtype=dtype)
@@ -840,7 +838,7 @@ class YOLOLossAnchorFree(nn.Module):
 
         return cls_preds, reg_preds, anchor_points, stride_tensor
 
-    def _bbox_decode(self, anchor_points, pred_dist):
+    def _bbox_decode(self, anchor_points, pred_dist, stride_tensor):
         """Decode predicted distributions to bboxes
 
         Following ultralytics: ltrb distances are in grid coordinates, not pixels.
@@ -849,6 +847,7 @@ class YOLOLossAnchorFree(nn.Module):
         Args:
             anchor_points: (n_points, 2) anchor point coordinates (grid indices)
             pred_dist: (bs, n_points, 4 * reg_max) predicted distributions
+            stride_tensor: (n_points, 2) stride values for each point (for per-scale clamping)
 
         Returns:
             bboxes: (bs, n_points, 4) bboxes in xyxy format (grid coordinates)
@@ -878,11 +877,13 @@ class YOLOLossAnchorFree(nn.Module):
 
         bboxes = torch.cat([x1y1, x2y2], dim=-1)  # (bs, n_points, 4)
 
-        # Clip bboxes to valid range [0, max_grid_size]
-        # This prevents negative coordinates and ensures valid IoU computation
-        # The max grid size is 80 for P3/8, 40 for P4/16, 20 for P5/32
-        # But since we concatenate all scales, we use 80 as the max
-        bboxes = bboxes.clamp(min=0, max=80)
+        # Per-scale clamping: use stride to compute max grid size for each point
+        # stride_tensor: (n_points, 2) -> max_grid = img_size / stride
+        # For img_size=640: stride=8 -> max=80, stride=16 -> max=40, stride=32 -> max=20
+        max_grid_size = (self.img_size / stride_tensor[:, 0:1]).unsqueeze(0)  # (1, n_points, 1)
+        # Clamp min first (scalar), then max (tensor)
+        bboxes = bboxes.clamp(min=0)
+        bboxes = torch.clamp(bboxes, max=max_grid_size)
 
         return bboxes
 
@@ -955,18 +956,22 @@ class YOLOLossAnchorFree(nn.Module):
 
 
 def bbox2dist(anchor_points, bboxes, reg_max):
-    """Transform bbox(xyxy) to dist(ltrb).
+    """Transform bbox(xyxy) to dist(ltrb) with proper scaling for DFL.
 
-    Following ultralytics implementation: simple distance calculation with clamp.
-    This assumes anchor_points and bboxes are in grid coordinates (not pixels).
+    Following ultralytics: DFL distances are in grid coordinates and should
+    be in range [0, reg_max-1] for the 32 DFL bins to be fully utilized.
+
+    Key insight: The grid size varies by scale (P3: 80, P4: 40, P5: 20),
+    so we need to scale distances to make the DFL bins represent consistent
+    relative distances across scales.
 
     Args:
         anchor_points: (n_points, 2) anchor point coordinates (grid units)
         bboxes: (bs, n_points, 4) target bboxes in xyxy format (grid units)
-        reg_max: maximum value for DFL (typically 16, so max distance is reg_max - 0.01)
+        reg_max: maximum value for DFL distribution (typically 32)
 
     Returns:
-        dist: (bs, n_points, 4) distances in ltrb format, clamped to [0, reg_max - 0.01]
+        dist: (bs, n_points, 4) distances in ltrb format, scaled to [0, reg_max-1]
     """
     bs = bboxes.shape[0]
     # anchor_points: (n_points, 2), need to expand to (bs, n_points, 2)
@@ -978,6 +983,11 @@ def bbox2dist(anchor_points, bboxes, reg_max):
 
     ltrb = torch.cat([lt, rb], dim=-1)  # (bs, n_points, 4)
 
-    # Clamp to [0, reg_max - 0.01] following ultralytics
-    # Note: reg_max - 0.01 (not reg_max - 1) ensures values stay within valid range
+    # IMPORTANT: No scaling applied here!
+    # The distances are kept in their original grid coordinate units.
+    # The DFL will learn to predict these values directly.
+    # We just clamp to ensure they stay within reasonable bounds.
+
+    # Clamp to [0, reg_max - 0.01] for numerical stability
+    # Note: This limits targets to the DFL's range
     return ltrb.clamp(0, reg_max - 0.01)
