@@ -118,7 +118,7 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
             epoch_start_time = time.time()
 
             # 训练一个 epoch
-            train_metrics = train_one_epoch(model, train_loader, optimizer, device, epoch+1, nc=nc)
+            train_metrics = train_one_epoch(model, train_loader, optimizer, device, epoch+1, epochs, nc=nc)
 
             # 定期清理内存
             if device.type == 'cuda':

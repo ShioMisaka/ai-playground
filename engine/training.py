@@ -3,11 +3,38 @@
 
 提供通用的单 epoch 训练逻辑。
 """
+import time
 import torch
 from typing import Optional, Dict
 
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[int] = None):
+def _format_progress_bar(current: int, total: int, elapsed: float) -> str:
+    """格式化进度条
+
+    Args:
+        current: 当前批次索引（从0开始）
+        total: 总批次数
+        elapsed: 已用时间（秒）
+
+    Returns:
+        格式化的进度条字符串
+    """
+    progress = (current + 1) / total
+    percent = int(progress * 100)
+
+    # 进度条宽度（字符数）
+    bar_width = 20
+    filled = int(progress * bar_width)
+    bar = '━' * filled + '─' * (bar_width - filled)
+
+    # 时间信息
+    it_time = elapsed / (current + 1) if current > 0 else 0
+    eta = it_time * (total - current - 1)
+
+    return f"{percent}% ━{bar} {current + 1}/{total} {it_time:.1f}s/it {elapsed:.1f}s<{eta:.1f}s"
+
+
+def train_one_epoch(model, dataloader, optimizer, device, epoch, total_epochs, nc: Optional[int] = None):
     """训练一个 epoch
 
     Args:
@@ -15,7 +42,8 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
         dataloader: 数据加载器
         optimizer: 优化器
         device: 设备
-        epoch: 当前 epoch
+        epoch: 当前 epoch（从1开始）
+        total_epochs: 总 epoch 数
         nc: 类别数量（用于计算准确率）
 
     Returns:
@@ -30,6 +58,8 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
     # 分类任务统计
     correct = 0
     total = 0
+
+    epoch_start_time = time.time()
 
     for batch_idx, (imgs, targets, paths) in enumerate(dataloader):
         imgs = imgs.to(device)
@@ -111,13 +141,18 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, nc: Optional[in
                 total += targets.size(0)
                 correct += (predicted == targets).sum().item()
 
-        if batch_idx % 10 == 0:
-            if loss_items is not None:
-                # 打印各损失分量
-                print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] "
-                      f"Loss: {current_loss:.4f} (box: {box_loss:.4f}, cls: {cls_loss:.4f}, dfl: {dfl_loss:.4f})")
-            else:
-                print(f"Epoch {epoch} [{batch_idx}/{len(dataloader)}] Loss: {loss.item():.4f}")
+        # 每个 iter 都更新打印
+        elapsed = time.time() - epoch_start_time
+        progress_bar = _format_progress_bar(batch_idx, len(dataloader), elapsed)
+
+        if loss_items is not None:
+            # 打印各损失分量（同一行更新，固定宽度）
+            print(f"\rEpoch [{epoch}/{total_epochs}]    Loss: {current_loss:>7.4f}    box: {box_loss:>7.4f}    cls: {cls_loss:>7.4f}    dfl: {dfl_loss:>7.4f}    {progress_bar}", end='', flush=True)
+        else:
+            print(f"\rEpoch [{epoch}/{total_epochs}]    Loss: {loss.item():>7.4f}    {progress_bar}", end='', flush=True)
+
+    # epoch 结束时换行
+    print()
 
     num_batches = len(dataloader)
     metrics = {
@@ -148,40 +183,40 @@ def print_metrics(train_metrics: Dict[str, float], val_metrics: Dict[str, float]
         is_detection: 是否为检测任务
     """
     if is_detection:
-        # 检测任务：打印各损失分量
-        print(f"Train - Loss: {train_metrics['loss']:.4f}", end='')
+        # 检测任务：打印各损失分量（固定宽度）
+        print(f"Train - Loss: {train_metrics['loss']:>7.4f}", end='')
         if 'box_loss' in train_metrics:
-            print(f" (box: {train_metrics['box_loss']:.4f}, "
-                  f"cls: {train_metrics['cls_loss']:.4f}, "
-                  f"dfl: {train_metrics['dfl_loss']:.4f})", end='')
+            print(f"    box: {train_metrics['box_loss']:>7.4f}    "
+                  f"cls: {train_metrics['cls_loss']:>7.4f}    "
+                  f"dfl: {train_metrics['dfl_loss']:>7.4f}", end='')
         if 'mAP50' in train_metrics and train_metrics['mAP50'] >= 0:
-            print(f" | mAP50: {train_metrics['mAP50']*100:.2f}%", end='')
+            print(f"    mAP50: {train_metrics['mAP50']*100:>6.2f}%", end='')
         elif 'mAP' in train_metrics and train_metrics['mAP'] >= 0:
-            print(f" | mAP: {train_metrics['mAP']*100:.2f}%", end='')
+            print(f"    mAP: {train_metrics['mAP']*100:>6.2f}%", end='')
         else:
-            print(f" | mAP: N/A", end='')
+            print(f"    mAP:   N/A", end='')
         print()
 
-        print(f"Val   - Loss: {val_metrics['loss']:.4f}", end='')
+        print(f"Val   - Loss: {val_metrics['loss']:>7.4f}", end='')
         if 'box_loss' in val_metrics:
-            print(f" (box: {val_metrics['box_loss']:.4f}, "
-                  f"cls: {val_metrics['cls_loss']:.4f}, "
-                  f"dfl: {val_metrics['dfl_loss']:.4f})", end='')
+            print(f"    box: {val_metrics['box_loss']:>7.4f}    "
+                  f"cls: {val_metrics['cls_loss']:>7.4f}    "
+                  f"dfl: {val_metrics['dfl_loss']:>7.4f}", end='')
         if 'mAP50' in val_metrics and val_metrics['mAP50'] >= 0:
-            print(f" | mAP50: {val_metrics['mAP50']*100:.2f}%", end='')
+            print(f"    mAP50: {val_metrics['mAP50']*100:>6.2f}%", end='')
         elif 'mAP' in val_metrics and val_metrics['mAP'] >= 0:
-            print(f" | mAP: {val_metrics['mAP']*100:.2f}%", end='')
+            print(f"    mAP: {val_metrics['mAP']*100:>6.2f}%", end='')
         else:
-            print(f" | mAP: N/A", end='')
+            print(f"    mAP:   N/A", end='')
         print()
     else:
-        # 分类任务
-        print(f"Train Loss: {train_metrics['loss']:.4f}", end='')
+        # 分类任务（固定宽度）
+        print(f"Train Loss: {train_metrics['loss']:>7.4f}", end='')
         if 'accuracy' in train_metrics:
-            print(f" | Acc: {train_metrics['accuracy']*100:.2f}%", end='')
+            print(f"    Acc: {train_metrics['accuracy']*100:>6.2f}%", end='')
         print()
 
-        print(f"Val Loss: {val_metrics['loss']:.4f}", end='')
+        print(f"Val Loss: {val_metrics['loss']:>7.4f}", end='')
         if 'accuracy' in val_metrics:
-            print(f" | Acc: {val_metrics['accuracy']*100:.2f}%", end='')
+            print(f"    Acc: {val_metrics['accuracy']*100:>6.2f}%", end='')
         print()
