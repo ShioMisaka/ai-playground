@@ -12,7 +12,7 @@ import torch
 from .training import train_one_epoch, print_metrics
 from .validate import validate
 from utils import (create_dataloaders, TrainingLogger, plot_training_curves,
-                   print_training_info, print_model_summary)
+                   print_training_info, print_model_summary, print_detection_header)
 
 
 def _create_optimizer(model, lr: float):
@@ -111,9 +111,11 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     # 训练循环
     with TrainingLogger(csv_path, is_detection) as logger:
         for epoch in range(epochs):
-            print(f"\nEpoch {epoch+1}/{epochs}")
-            print("-" * 50)
-            print(f"Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
+            print(f"\nEpoch {epoch+1}/{epochs}  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
+            print("-" * 54)
+            # 打印表头（仅检测任务）
+            if is_detection:
+                print_detection_header()
 
             epoch_start_time = time.time()
 

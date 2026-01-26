@@ -20,6 +20,13 @@ from .metrics import (
     format_metrics,
 )
 
+# 表格格式化工具
+from .table import (
+    print_detection_header,
+    format_detection_train_line,
+    format_detection_val_line,
+)
+
 # 模型和训练信息输出
 from .model_summary import (
     print_training_info,
@@ -51,6 +58,11 @@ __all__ = [
     'compute_detection_metrics',
     'compute_classification_metrics',
     'format_metrics',
+
+    # 表格格式化
+    'print_detection_header',
+    'format_detection_train_line',
+    'format_detection_val_line',
 
     # 模型和训练信息
     'print_training_info',

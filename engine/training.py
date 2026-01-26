@@ -6,6 +6,7 @@
 import time
 import torch
 from typing import Optional, Dict
+from utils import format_detection_train_line, format_detection_val_line
 
 
 def _format_progress_bar(current: int, total: int, elapsed: float) -> str:
@@ -146,8 +147,9 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, total_epochs, n
         progress_bar = _format_progress_bar(batch_idx, len(dataloader), elapsed)
 
         if loss_items is not None:
-            # 打印各损失分量（同一行更新，固定宽度）
-            print(f"\rEpoch [{epoch}/{total_epochs}]    Loss: {current_loss:>7.4f}    box: {box_loss:>7.4f}    cls: {cls_loss:>7.4f}    dfl: {dfl_loss:>7.4f}    {progress_bar}", end='', flush=True)
+            # 使用表格格式化工具打印训练进度
+            line = format_detection_train_line(current_loss, box_loss, cls_loss, dfl_loss, progress_bar)
+            print(f"\r{line}", end='', flush=True)
         else:
             print(f"\rEpoch [{epoch}/{total_epochs}]    Loss: {loss.item():>7.4f}    {progress_bar}", end='', flush=True)
 
@@ -183,30 +185,18 @@ def print_metrics(train_metrics: Dict[str, float], val_metrics: Dict[str, float]
         is_detection: 是否为检测任务
     """
     if is_detection:
-        # 检测任务：打印各损失分量（固定宽度）
-        print(f"Train - Loss: {train_metrics['loss']:>7.4f}", end='')
-        if 'box_loss' in train_metrics:
-            print(f"    box: {train_metrics['box_loss']:>7.4f}    "
-                  f"cls: {train_metrics['cls_loss']:>7.4f}    "
-                  f"dfl: {train_metrics['dfl_loss']:>7.4f}", end='')
-        if 'mAP50' in train_metrics and train_metrics['mAP50'] >= 0:
-            print(f"    mAP50: {train_metrics['mAP50']*100:>6.2f}%", end='')
-        print()
-
-        print(f"Val   - Loss: {val_metrics['loss']:>7.4f}", end='')
-        if 'box_loss' in val_metrics:
-            print(f"    box: {val_metrics['box_loss']:>7.4f}    "
-                  f"cls: {val_metrics['cls_loss']:>7.4f}    "
-                  f"dfl: {val_metrics['dfl_loss']:>7.4f}", end='')
-        if 'mAP50' in val_metrics and val_metrics['mAP50'] >= 0:
-            print(f"    mAP50: {val_metrics['mAP50']*100:>6.2f}%", end='')
-        elif 'mAP' in val_metrics and val_metrics['mAP'] >= 0:
-            print(f"    mAP: {val_metrics['mAP']*100:>6.2f}%", end='')
-        else:
-            print(f"    mAP:   N/A", end='')
-        print()
+        # 检测任务：只打印 Val 行（Train 行已在训练过程中显示）
+        map50 = val_metrics.get('mAP50', None)
+        val_line = format_detection_val_line(
+            val_metrics['loss'],
+            val_metrics['box_loss'],
+            val_metrics['cls_loss'],
+            val_metrics['dfl_loss'],
+            map50
+        )
+        print(val_line)
     else:
-        # 分类任务（固定宽度）
+        # 分类任务
         print(f"Train Loss: {train_metrics['loss']:>7.4f}", end='')
         if 'accuracy' in train_metrics:
             print(f"    Acc: {train_metrics['accuracy']*100:>6.2f}%", end='')
