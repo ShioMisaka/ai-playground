@@ -191,10 +191,6 @@ def print_metrics(train_metrics: Dict[str, float], val_metrics: Dict[str, float]
                   f"dfl: {train_metrics['dfl_loss']:>7.4f}", end='')
         if 'mAP50' in train_metrics and train_metrics['mAP50'] >= 0:
             print(f"    mAP50: {train_metrics['mAP50']*100:>6.2f}%", end='')
-        elif 'mAP' in train_metrics and train_metrics['mAP'] >= 0:
-            print(f"    mAP: {train_metrics['mAP']*100:>6.2f}%", end='')
-        else:
-            print(f"    mAP:   N/A", end='')
         print()
 
         print(f"Val   - Loss: {val_metrics['loss']:>7.4f}", end='')

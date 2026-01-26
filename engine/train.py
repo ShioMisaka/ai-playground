@@ -148,7 +148,6 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
             if val_metrics['loss'] < best_loss:
                 best_loss = val_metrics['loss']
                 _save_checkpoint(model, optimizer, epoch, best_loss, save_dir / 'best.pt')
-                print(f"保存最佳模型: {save_dir / 'best.pt'}")
 
             # 保存最后一个 epoch
             _save_checkpoint(model, optimizer, epoch, val_metrics['loss'], save_dir / 'last.pt')

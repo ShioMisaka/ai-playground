@@ -58,6 +58,7 @@ def bbox_iou(box1: np.ndarray, box2: np.ndarray) -> np.ndarray:
 def compute_map50(predictions: List[Dict[str, np.ndarray]],
                   targets: torch.Tensor,
                   nc: int,
+                  img_size: int = 640,
                   iou_threshold: float = 0.5,
                   conf_threshold: float = 0.25) -> Dict[str, float]:
     """计算 mAP@0.5
@@ -95,6 +96,8 @@ def compute_map50(predictions: List[Dict[str, np.ndarray]],
             class_id = int(gt[1])
             if 0 <= class_id < nc:
                 x, y, w, h = gt[2:6]
+                # 反归一化到像素坐标
+                x, y, w, h = x * img_size, y * img_size, w * img_size, h * img_size
                 x1, y1 = x - w/2, y - h/2
                 x2, y2 = x + w/2, y + h/2
                 gt_by_class[class_id].append([x1, y1, x2, y2])

@@ -180,7 +180,7 @@ def validate(model, dataloader, device, nc=None, img_size=640):
         if nc is not None and len(all_detections) > 0:
             # 合并所有 batch 的 GT
             all_gt = torch.cat(all_gt_boxes, dim=0)
-            map50_results = compute_map50(all_detections, all_gt, nc)
+            map50_results = compute_map50(all_detections, all_gt, nc, img_size=img_size)
             metrics['mAP50'] = map50_results['mAP50']
         else:
             metrics['mAP50'] = 0.0
