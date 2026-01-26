@@ -158,7 +158,7 @@ class YOLOv11(nn.Module):
         # ===== Detection Head =====
         # Anchor-free detection head (like YOLOv8/v11)
         # [[16, 19, 22], 1, DetectAnchorFree, [nc]]
-        self.detect = DetectAnchorFree(nc=nc, reg_max=32, ch=(c3, c4, c5))
+        self.detect = DetectAnchorFree(nc=nc, reg_max=16, ch=(c3, c4, c5))
 
         # Initialize biases following ultralytics formula
         # This is CRITICAL for proper initial loss values
@@ -167,7 +167,7 @@ class YOLOv11(nn.Module):
         # Anchor-free loss function with DFL
         self.loss_fn = YOLOLossAnchorFree(
             num_classes=nc,
-            reg_max=32,
+            reg_max=16,
             img_size=img_size,
             use_dfl=True
         )

@@ -154,7 +154,6 @@ from engine import train
 model = YOLOv11(
     nc=2,           # number of classes
     scale='n',      # n/s/m/l/x for nano/small/medium/large/xlarge
-    reg_max=32,     # DFL distribution bins
     img_size=640
 )
 
@@ -270,10 +269,20 @@ history['lr'].append(float(optimizer.param_groups[0]['lr']))
 ### YOLOv11 Training Parameters
 
 - **Learning Rate**: Use `lr=0.001` for stable training (higher values like 0.01 cause divergence)
-- **Warmup**: 3 epochs with linear warmup (lr increases from 0.00033 to 0.001)
 - **Loss Weights**: box=7.5, cls=0.5, dfl=1.5 (following ultralytics defaults)
+- **reg_max**: 16 (DFL distribution bins, matches ultralytics YOLOv8)
+- **IoU Loss**: CIoU (Complete IoU) for better convergence
 - **Batch Size**: 8-16 depending on GPU memory
 - **Image Size**: 640 (standard), can be adjusted based on dataset
+
+### Learning Rate Scheduler
+
+Uses **CosineAnnealingWarmRestarts** to help model escape local optima:
+- **T_0**: 10 epochs (first restart cycle)
+- **T_mult**: 2 (cycle length multiplier, next cycle is 20 epochs)
+- **eta_min**: 1e-6 (minimum learning rate)
+
+This scheduler periodically restarts the learning rate, allowing the model to continue optimizing when loss plateaus.
 
 ### Common Training Issues
 
@@ -284,6 +293,8 @@ If `box_loss` remains high (>4.0) after several epochs:
 1. **Check learning rate**: Should be 0.001 or lower
 2. **Verify data loading**: Run `python scripts/diagnose_training.py` to check labels
 3. **Check initial predictions**: Run `python scripts/debug_assigner.py` to analyze IoU
+4. **Ensure reg_max=16**: Higher values (e.g., 32) make convergence much harder
+5. **Verify CIoU is enabled**: Check `modules/yolo_loss.py:583` has `CIoU=True`
 
 #### mAP50 Stays at 0%
 
@@ -304,7 +315,7 @@ Expected loss ranges during early training:
 
 YOLOv11 uses special bias initialization:
 - **Classification bias**: Set to very low values (~-7.85) to reduce initial false positives
-- **Regression bias**: Set to -3.5 to align DFL predictions with target range [0-30]
+- **Regression bias**: Set to -3.5 to align DFL predictions with target range [0-15] (reg_max=16)
 
 ### Per-Scale Bbox Clamping
 

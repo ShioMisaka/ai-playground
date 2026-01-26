@@ -28,17 +28,30 @@ def _create_optimizer(model, lr: float):
 def _create_scheduler(optimizer, epochs: int, warmup_epochs: int = 3):
     """创建学习率调度器
 
-    使用 warmup + cosine annealing 策略
-    """
-    def warmup_lambda(epoch):
-        if epoch < warmup_epochs:
-            return (epoch + 1) / warmup_epochs
-        else:
-            # Cosine annealing
-            progress = (epoch - warmup_epochs) / (epochs - warmup_epochs)
-            return 0.5 * (1 + torch.cos(torch.tensor(progress * 3.14159)))
+    使用 warmup + CosineAnnealingWarmRestarts 策略
+    周期性重启学习率，帮助模型跳出局部最优解
 
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
+    Args:
+        optimizer: 优化器
+        epochs: 总训练轮数
+        warmup_epochs: warmup 轮数
+
+    Returns:
+        学习率调度器
+    """
+    # T_0: 第一次重启的周期长度（epoch数）
+    # T_mult: 每次重启后周期长度的倍增因子
+    # eta_min: 最小学习率
+    T_0 = 10
+    T_mult = 2
+    eta_min = 1e-6
+
+    return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=T_0,
+        T_mult=T_mult,
+        eta_min=eta_min
+    )
 
 
 def _save_checkpoint(model, optimizer, epoch, loss, save_path: Path):

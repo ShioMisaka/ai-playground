@@ -192,7 +192,6 @@ from models import YOLOv11
 model = YOLOv11(
     nc=2,           # 类别数
     scale='n',      # n/s/m/l/x (nano/small/medium/large/xlarge)
-    reg_max=32,     # DFL 分布 bins
     img_size=640
 )
 
@@ -338,11 +337,14 @@ epoch,time,lr,train_loss,val_loss,train_box_loss,train_cls_loss,train_dfl_loss,v
   - P4 (stride=16): max=40
   - P5 (stride=32): max=20
 - **优化的损失权重** - box: 7.5, cls: 0.5, dfl: 1.5 (与 ultralytics 一致)
-- **改进的 DFL 初始化** - regression bias=-3.5，使初始预测更接近目标范围
+- **CIoU Loss** - 使用 Complete IoU，考虑重叠面积、中心距和长宽比
+- **改进的 DFL 初始化** - regression bias=-3.5，使初始预测更接近目标范围 [0-15]
 - **损失分量跟踪** - 实时显示 box_loss、cls_loss、dfl_loss
 - **Task-Aligned Assignment** - 自动调整 topk=64, beta=2.0 获得更多正样本
 - **梯度裁剪** - max_norm=10.0 防止梯度爆炸
-- **IoU Loss 优化** - 使用普通 IoU 替代 CIoU 改善早期训练
+- **学习率调度器** - CosineAnnealingWarmRestarts 帮助模型跳出局部最优
+  - T_0=10, T_mult=2, eta_min=1e-6
+  - 每 10/20/40... 个 epoch 重启学习率
 
 ### 训练参数建议
 
@@ -363,6 +365,8 @@ epoch,time,lr,train_loss,val_loss,train_box_loss,train_cls_loss,train_dfl_loss,v
 1. **检查学习率**：应为 0.001 或更低
 2. **验证数据加载**：运行 `python scripts/diagnose_training.py` 检查标签
 3. **分析初始预测**：运行 `python scripts/debug_assigner.py` 查看 IoU
+4. **确认 reg_max=16**：更高的值（如 32）会显著增加收敛难度
+5. **验证 CIoU 已启用**：检查 `modules/yolo_loss.py:583` 中 `CIoU=True`
 
 #### mAP50 长期为 0%
 

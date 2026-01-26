@@ -575,12 +575,12 @@ class BboxLoss(nn.Module):
         # Weight by target scores
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)  # (n_fg, 1)
 
-        # IoU loss - use simple IoU for better gradient flow
-        # CIoU can have issues when boxes don't overlap during early training
+        # IoU loss - use CIoU for better convergence
+        # CIoU considers overlap, center distance, and aspect ratio
         iou = bbox_iou(
             pred_bboxes[fg_mask],
             target_bboxes[fg_mask],
-            xywh=False, CIoU=False, GIoU=False
+            xywh=False, CIoU=True, GIoU=False
         )
         # Ensure IoU is non-negative for stable gradients
         iou = iou.clamp(min=0)
