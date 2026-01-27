@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import torch
+from rich.console import Console
 
 from .training import train_one_epoch, print_metrics
 from .validate import validate
@@ -186,11 +187,11 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
 
     except KeyboardInterrupt:
         # 捕获 Ctrl+C，优雅地中断训练
-        print("\n\n[yellow]训练被用户中断 (KeyboardInterrupt)[/yellow]")
+        live_logger._console.print("\n\n[yellow]训练被用户中断 (KeyboardInterrupt)[/yellow]")
 
     except Exception as e:
         # 捕获其他未知错误
-        print(f"\n\n[red]训练发生错误: {e}[/red]")
+        live_logger._console.print(f"\n\n[red]训练发生错误: {e}[/red]")
         raise e  # 抛出异常以便调试
 
     finally:
