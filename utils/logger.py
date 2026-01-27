@@ -327,9 +327,12 @@ class LiveTableLogger:
             val_cells.append(map50_str)
             final_table.add_row(*val_cells)
 
-        # 将标题和表格作为元组保存
+        # 创建 Epoch Time 字符串
+        epoch_time_str = f"[dim]Epoch Time: {epoch_time:.2f}s[/dim]"
+
+        # 将标题、表格和 epoch time 作为元组保存
         header = self._create_epoch_header(self._current_epoch, self._current_lr)
-        self._completed_tables.append((header, final_table))
+        self._completed_tables.append((header, final_table, epoch_time_str))
 
         # 清空当前状态
         self._current_table = None
@@ -351,9 +354,10 @@ class LiveTableLogger:
 
         # 添加已完成的表格
         for item in self._completed_tables:
-            header, table = item  # 解包元组
+            header, table, epoch_time_str = item  # 解包元组
             content.append(header)  # 添加标题
             content.append(table)
+            content.append(epoch_time_str)  # 添加 Epoch Time
             content.append("")  # 空行分隔
 
         # 添加当前正在训练的表格（每次重新创建）
