@@ -7,7 +7,7 @@ from .scaling import make_divisible, compute_channels, compute_depth
 from .load import get_data_loader, create_dataloaders
 
 # 训练日志
-from .logger import TrainingLogger
+from .logger import TrainingLogger, LiveTableLogger
 
 # 训练曲线可视化
 from .curves import plot_training_curves
@@ -49,6 +49,7 @@ __all__ = [
 
     # 训练日志
     'TrainingLogger',
+    'LiveTableLogger',
 
     # 训练曲线可视化
     'plot_training_curves',
