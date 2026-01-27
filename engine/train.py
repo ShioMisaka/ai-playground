@@ -11,7 +11,7 @@ import torch
 
 from .training import train_one_epoch, print_metrics
 from .validate import validate
-from utils import (create_dataloaders, TrainingLogger, plot_training_curves,
+from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
                    print_training_info, print_model_summary, print_detection_header)
 
 
@@ -121,19 +121,41 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
 
     best_loss = float('inf')
 
+    # 创建 LiveTableLogger
+    if is_detection:
+        live_logger = LiveTableLogger(
+            columns=["total_loss", "box_loss", "cls_loss", "dfl_loss"],
+            total_epochs=epochs,
+            console_width=130,  # 建议使用 130+ 的宽度以完整显示进度条
+        )
+    else:
+        live_logger = LiveTableLogger(
+            columns=["total_loss", "accuracy"],
+            total_epochs=epochs,
+            console_width=130,
+        )
+
+    # 启动 LiveTableLogger
+    live_logger.start()
+
     # 训练循环
-    with TrainingLogger(csv_path, is_detection) as logger:
+    with TrainingLogger(csv_path, is_detection) as csv_logger:
         for epoch in range(epochs):
-            print(f"\nEpoch {epoch+1}/{epochs}  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
-            print("-" * 54)
-            # 打印表头（仅检测任务）
-            if is_detection:
-                print_detection_header()
+            # 开始新的 epoch
+            live_logger.start_epoch(epoch + 1, optimizer.param_groups[0]["lr"])
+
+            # 传统打印方式：打印 epoch 标题（可选，用于调试）
+            # print(f"\nEpoch {epoch+1}/{epochs}  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
+            # print("-" * 54)
+            # if is_detection:
+            #     print_detection_header()
 
             epoch_start_time = time.time()
 
             # 训练一个 epoch
-            train_metrics = train_one_epoch(model, train_loader, optimizer, device, epoch+1, epochs, nc=nc)
+            train_metrics = train_one_epoch(
+                model, train_loader, optimizer, device, epoch + 1, epochs, nc=nc, live_logger=live_logger
+            )
 
             # 定期清理内存
             if device.type == 'cuda':
@@ -151,21 +173,30 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
 
             epoch_time = time.time() - epoch_start_time
 
-            # 打印结果
-            print_metrics(train_metrics, val_metrics, is_detection)
-            print(f"Epoch Time: {epoch_time:.2f}s")
+            # 打印结果到 LiveTableLogger 或传统方式
+            print_metrics(train_metrics, val_metrics, is_detection, live_logger)
 
-            # 写入日志
-            logger.write_epoch(epoch + 1, epoch_time, optimizer.param_groups[0]['lr'],
-                              train_metrics, val_metrics)
+            # 结束当前 epoch
+            live_logger.end_epoch(epoch_time)
+
+            # 传统打印方式：打印 epoch 时间（可选）
+            # print(f"Epoch Time: {epoch_time:.2f}s")
+
+            # 写入 CSV 日志
+            csv_logger.write_epoch(
+                epoch + 1, epoch_time, optimizer.param_groups[0]["lr"], train_metrics, val_metrics
+            )
 
             # 保存最佳模型
-            if val_metrics['loss'] < best_loss:
-                best_loss = val_metrics['loss']
-                _save_checkpoint(model, optimizer, epoch, best_loss, save_dir / 'best.pt')
+            if val_metrics["loss"] < best_loss:
+                best_loss = val_metrics["loss"]
+                _save_checkpoint(model, optimizer, epoch, best_loss, save_dir / "best.pt")
 
             # 保存最后一个 epoch
-            _save_checkpoint(model, optimizer, epoch, val_metrics['loss'], save_dir / 'last.pt')
+            _save_checkpoint(model, optimizer, epoch, val_metrics["loss"], save_dir / "last.pt")
+
+    # 停止 LiveTableLogger
+    live_logger.stop()
 
     print("\n训练完成!")
     print(f"训练日志已保存到: {csv_path}")

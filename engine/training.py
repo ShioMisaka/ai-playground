@@ -5,7 +5,11 @@
 """
 import time
 import torch
-from typing import Optional, Dict
+from typing import Optional, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from utils import LiveTableLogger
+
 from utils import format_detection_train_line, format_detection_val_line
 
 
@@ -35,7 +39,16 @@ def _format_progress_bar(current: int, total: int, elapsed: float) -> str:
     return f"{percent}% ━{bar} {current + 1}/{total} {it_time:.1f}s/it {elapsed:.1f}s<{eta:.1f}s"
 
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch, total_epochs, nc: Optional[int] = None):
+def train_one_epoch(
+    model,
+    dataloader,
+    optimizer,
+    device,
+    epoch,
+    total_epochs,
+    nc: Optional[int] = None,
+    live_logger: Optional["LiveTableLogger"] = None,
+):
     """训练一个 epoch
 
     Args:
@@ -46,6 +59,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, total_epochs, n
         epoch: 当前 epoch（从1开始）
         total_epochs: 总 epoch 数
         nc: 类别数量（用于计算准确率）
+        live_logger: LiveTableLogger 实例（可选），用于动态表格显示
 
     Returns:
         dict: 包含 loss, box_loss, cls_loss, dfl_loss, accuracy/mAP 等指标的字典
@@ -144,17 +158,55 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, total_epochs, n
 
         # 每个 iter 都更新打印
         elapsed = time.time() - epoch_start_time
-        progress_bar = _format_progress_bar(batch_idx, len(dataloader), elapsed)
 
         if loss_items is not None:
-            # 使用表格格式化工具打印训练进度
-            line = format_detection_train_line(current_loss, box_loss, cls_loss, dfl_loss, progress_bar)
-            print(f"\r{line}", end='', flush=True)
+            # 检测任务：使用 LiveTableLogger 或传统打印
+            if live_logger is not None:
+                # 使用 LiveTableLogger 更新
+                live_logger.update_row(
+                    "train",
+                    {
+                        "total_loss": current_loss,
+                        "box_loss": box_loss,
+                        "cls_loss": cls_loss,
+                        "dfl_loss": dfl_loss,
+                    },
+                    progress={
+                        "current": batch_idx,
+                        "total": len(dataloader),
+                        "elapsed": elapsed,
+                    },
+                )
+            else:
+                # 传统打印方式（向后兼容）
+                progress_bar = _format_progress_bar(batch_idx, len(dataloader), elapsed)
+                line = format_detection_train_line(
+                    current_loss, box_loss, cls_loss, dfl_loss, progress_bar
+                )
+                print(f"\r{line}", end="", flush=True)
         else:
-            print(f"\rEpoch [{epoch}/{total_epochs}]    Loss: {loss.item():>7.4f}    {progress_bar}", end='', flush=True)
+            # 分类任务
+            if live_logger is not None:
+                live_logger.update_row(
+                    "train",
+                    {"total_loss": loss.item()},
+                    progress={
+                        "current": batch_idx,
+                        "total": len(dataloader),
+                        "elapsed": elapsed,
+                    },
+                )
+            else:
+                progress_bar = _format_progress_bar(batch_idx, len(dataloader), elapsed)
+                print(
+                    f"\rEpoch [{epoch}/{total_epochs}]    Loss: {loss.item():>7.4f}    {progress_bar}",
+                    end="",
+                    flush=True,
+                )
 
-    # epoch 结束时换行
-    print()
+    # epoch 结束时换行（仅传统打印方式）
+    if live_logger is None:
+        print()
 
     num_batches = len(dataloader)
     metrics = {
@@ -176,33 +228,61 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, total_epochs, n
     return metrics
 
 
-def print_metrics(train_metrics: Dict[str, float], val_metrics: Dict[str, float], is_detection: bool):
+def print_metrics(
+    train_metrics: Dict[str, float],
+    val_metrics: Dict[str, float],
+    is_detection: bool,
+    live_logger: Optional["LiveTableLogger"] = None,
+):
     """打印训练和验证指标
 
     Args:
         train_metrics: 训练集指标
         val_metrics: 验证集指标
         is_detection: 是否为检测任务
+        live_logger: LiveTableLogger 实例（可选），用于动态表格显示
     """
     if is_detection:
-        # 检测任务：只打印 Val 行（Train 行已在训练过程中显示）
-        map50 = val_metrics.get('mAP50', None)
-        val_line = format_detection_val_line(
-            val_metrics['loss'],
-            val_metrics['box_loss'],
-            val_metrics['cls_loss'],
-            val_metrics['dfl_loss'],
-            map50
-        )
-        print(val_line)
+        # 检测任务：更新 Val 行到 LiveTableLogger 或传统打印
+        if live_logger is not None:
+            live_logger.update_row(
+                "val",
+                {
+                    "total_loss": val_metrics["loss"],
+                    "box_loss": val_metrics.get("box_loss", 0),
+                    "cls_loss": val_metrics.get("cls_loss", 0),
+                    "dfl_loss": val_metrics.get("dfl_loss", 0),
+                    "mAP50": val_metrics.get("mAP50"),
+                },
+            )
+        else:
+            # 传统打印方式（Train 行已在训练过程中显示，只打印 Val 行）
+            map50 = val_metrics.get("mAP50", None)
+            val_line = format_detection_val_line(
+                val_metrics["loss"],
+                val_metrics["box_loss"],
+                val_metrics["cls_loss"],
+                val_metrics["dfl_loss"],
+                map50,
+            )
+            print(val_line)
     else:
         # 分类任务
-        print(f"Train Loss: {train_metrics['loss']:>7.4f}", end='')
-        if 'accuracy' in train_metrics:
-            print(f"    Acc: {train_metrics['accuracy']*100:>6.2f}%", end='')
-        print()
+        if live_logger is not None:
+            live_logger.update_row(
+                "val",
+                {
+                    "total_loss": val_metrics["loss"],
+                    "accuracy": val_metrics.get("accuracy"),
+                },
+            )
+        else:
+            print(f"Train Loss: {train_metrics['loss']:>7.4f}", end="")
+            if "accuracy" in train_metrics:
+                print(f"    Acc: {train_metrics['accuracy']*100:>6.2f}%", end="")
+            print()
 
-        print(f"Val Loss: {val_metrics['loss']:>7.4f}", end='')
-        if 'accuracy' in val_metrics:
-            print(f"    Acc: {val_metrics['accuracy']*100:>6.2f}%", end='')
-        print()
+            print(f"Val Loss: {val_metrics['loss']:>7.4f}", end="")
+            if "accuracy" in val_metrics:
+                print(f"    Acc: {val_metrics['accuracy']*100:>6.2f}%", end="")
+            print()
