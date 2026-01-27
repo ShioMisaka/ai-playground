@@ -135,68 +135,68 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
             console_width=130,
         )
 
-    # 启动 LiveTableLogger
-    live_logger.start()
+    # 训练循环（使用 try...except...finally 确保异常时也能正确关闭 LiveTableLogger）
+    try:
+        with TrainingLogger(csv_path, is_detection) as csv_logger:
+            for epoch in range(epochs):
+                # 开始新的 epoch
+                live_logger.start_epoch(epoch + 1, optimizer.param_groups[0]["lr"])
 
-    # 训练循环
-    with TrainingLogger(csv_path, is_detection) as csv_logger:
-        for epoch in range(epochs):
-            # 开始新的 epoch
-            live_logger.start_epoch(epoch + 1, optimizer.param_groups[0]["lr"])
+                epoch_start_time = time.time()
 
-            # 传统打印方式：打印 epoch 标题（可选，用于调试）
-            # print(f"\nEpoch {epoch+1}/{epochs}  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
-            # print("-" * 54)
-            # if is_detection:
-            #     print_detection_header()
+                # 训练一个 epoch
+                train_metrics = train_one_epoch(
+                    model, train_loader, optimizer, device, epoch + 1, epochs, nc=nc, live_logger=live_logger
+                )
 
-            epoch_start_time = time.time()
+                # 定期清理内存
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
 
-            # 训练一个 epoch
-            train_metrics = train_one_epoch(
-                model, train_loader, optimizer, device, epoch + 1, epochs, nc=nc, live_logger=live_logger
-            )
+                # 验证
+                val_metrics = validate(model, val_loader, device, nc=nc, img_size=img_size)
 
-            # 定期清理内存
-            if device.type == 'cuda':
-                torch.cuda.empty_cache()
+                # 清理内存
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
 
-            # 验证
-            val_metrics = validate(model, val_loader, device, nc=nc, img_size=img_size)
+                # 更新学习率
+                scheduler.step()
 
-            # 清理内存
-            if device.type == 'cuda':
-                torch.cuda.empty_cache()
+                epoch_time = time.time() - epoch_start_time
 
-            # 更新学习率
-            scheduler.step()
+                # 打印结果到 LiveTableLogger
+                print_metrics(train_metrics, val_metrics, is_detection, live_logger)
 
-            epoch_time = time.time() - epoch_start_time
+                # 结束当前 epoch
+                live_logger.end_epoch(epoch_time)
 
-            # 打印结果到 LiveTableLogger 或传统方式
-            print_metrics(train_metrics, val_metrics, is_detection, live_logger)
+                # 写入 CSV 日志
+                csv_logger.write_epoch(
+                    epoch + 1, epoch_time, optimizer.param_groups[0]["lr"], train_metrics, val_metrics
+                )
 
-            # 结束当前 epoch
-            live_logger.end_epoch(epoch_time)
+                # 保存最佳模型
+                if val_metrics["loss"] < best_loss:
+                    best_loss = val_metrics["loss"]
+                    _save_checkpoint(model, optimizer, epoch, best_loss, save_dir / "best.pt")
 
-            # 传统打印方式：打印 epoch 时间（可选）
-            # print(f"Epoch Time: {epoch_time:.2f}s")
+                # 保存最后一个 epoch
+                _save_checkpoint(model, optimizer, epoch, val_metrics["loss"], save_dir / "last.pt")
 
-            # 写入 CSV 日志
-            csv_logger.write_epoch(
-                epoch + 1, epoch_time, optimizer.param_groups[0]["lr"], train_metrics, val_metrics
-            )
+    except KeyboardInterrupt:
+        # 捕获 Ctrl+C，优雅地中断训练
+        print("\n\n[yellow]训练被用户中断 (KeyboardInterrupt)[/yellow]")
 
-            # 保存最佳模型
-            if val_metrics["loss"] < best_loss:
-                best_loss = val_metrics["loss"]
-                _save_checkpoint(model, optimizer, epoch, best_loss, save_dir / "best.pt")
+    except Exception as e:
+        # 捕获其他未知错误
+        print(f"\n\n[red]训练发生错误: {e}[/red]")
+        raise e  # 抛出异常以便调试
 
-            # 保存最后一个 epoch
-            _save_checkpoint(model, optimizer, epoch, val_metrics["loss"], save_dir / "last.pt")
-
-    # 停止 LiveTableLogger
-    live_logger.stop()
+    finally:
+        # 无论成功、中断还是报错，都会执行这里
+        # 强制停止 LiveTableLogger 并恢复光标
+        live_logger.stop()
 
     print("\n训练完成!")
     print(f"训练日志已保存到: {csv_path}")

@@ -118,6 +118,10 @@ class LiveTableLogger:
     """使用 rich.table 的动态表格 Logger
 
     每个 epoch 显示一个独立表格，支持动态刷新当前 epoch 的数据。
+
+    设计原则：
+    - 已完成的 epoch：直接打印到终端，保留历史但不刷新
+    - 当前正在训练的 epoch：使用 Live 动态刷新
     """
 
     def __init__(
@@ -138,13 +142,11 @@ class LiveTableLogger:
         self.columns = columns
         self.total_epochs = total_epochs
         self.column_formatters = column_formatters or {}
-        self._console_width = console_width
 
         # 状态管理
         self._console = Console(width=console_width) if console_width else Console()
         self._live: Optional[Live] = None
-        self._completed_tables: List[Table] = []
-        self._current_table: Optional[Table] = None
+        # 当前正在训练的 epoch 数据
         self._current_epoch: Optional[int] = None
         self._current_lr: Optional[float] = None
         self._train_data: Optional[Dict[str, Any]] = None
@@ -152,60 +154,47 @@ class LiveTableLogger:
         self._train_progress: Optional[str] = None
 
     def _format_value(self, column: str, value: Any) -> str:
-        """格式化列值
-
-        Args:
-            column: 列名
-            value: 原始值
-
-        Returns:
-            格式化后的字符串
-        """
+        """格式化列值"""
         if column in self.column_formatters:
             return self.column_formatters[column](value)
         if isinstance(value, float):
             return f"{value:.4f}"
         return str(value)
 
-    def _create_table(self, epoch: int, lr: float) -> Table:
-        """创建一个新的 epoch 表格
-
-        Args:
-            epoch: 当前 epoch
-            lr: 学习率
-
-        Returns:
-            rich.table.Table
-        """
+    def _create_table(self) -> Table:
+        """创建数据表格（无边框）"""
         table = Table(
-            title=None,  # 不使用 title，手动添加
-            box=None,  # 无边框
             show_header=True,
             header_style="bold magenta",
             padding=(0, 1),
             show_edge=False,
-            show_lines=False,
+            box=None,  # 无边框
         )
-
-        # 添加列
-        table.add_column("", style="cyan", width=9)  # Train/Val 标签列
+        table.add_column("", style="cyan", width=9)
         for col in self.columns:
             table.add_column(col, justify="right", width=10)
-        table.add_column("", width=65, overflow="fold")  # 进度条/mAP50 列
-
+        table.add_column("", width=65, overflow="fold")
         return table
 
     def _create_epoch_header(self, epoch: int, lr: float) -> str:
-        """创建 epoch 标题行
+        """创建 epoch 标题行"""
+        return f"[bold cyan]Epoch {epoch}/{self.total_epochs}[/bold cyan]  [dim]lr={lr:.6f}[/dim]"
 
-        Args:
-            epoch: 当前 epoch
-            lr: 学习率
-
-        Returns:
-            标题字符串
-        """
-        return f"[bold cyan]Epoch {epoch}/{self.total_epochs}[/bold cyan]  [dim]Learning Rate: {lr:.6f}[/dim]"
+    def _add_row_to_table(self, table: Table, phase: str, data: Dict[str, Any], progress: Optional[str] = None):
+        """向表格添加一行"""
+        if phase == "train":
+            cells = ["Train -"]
+            for col in self.columns:
+                cells.append(self._format_value(col, data.get(col, "")))
+            cells.append(progress or "")
+        else:
+            cells = ["Val   -"]
+            for col in self.columns:
+                cells.append(self._format_value(col, data.get(col, "")))
+            map50 = data.get("mAP50")
+            map50_str = f"mAP50: {map50*100:>6.2f}%" if map50 is not None else ""
+            cells.append(map50_str)
+        table.add_row(*cells)
 
     def _render_progress_bar(
         self,
@@ -237,16 +226,17 @@ class LiveTableLogger:
         return f"{percent}% {bar} {current + 1}/{total} {it_time:.1f}s/it {elapsed:.1f}s<{eta:.1f}s"
 
     def start(self):
-        """启动 LiveTableLogger，初始化 rich.live"""
+        """启动 LiveTableLogger"""
         self._live = Live(
             Group(),
             console=self._console,
-            refresh_per_second=10,
+            refresh_per_second=4,
+            transient=False,  # 保留最后输出的内容
         )
         self._live.start()
 
     def start_epoch(self, epoch: int, lr: float):
-        """开始一个新的 epoch
+        """开始一个新的 epoch，启动 Live 显示
 
         Args:
             epoch: 当前 epoch 编号
@@ -254,10 +244,13 @@ class LiveTableLogger:
         """
         self._current_epoch = epoch
         self._current_lr = lr
-        self._current_table = self._create_table(epoch, lr)
         self._train_data = None
         self._val_data = None
         self._train_progress = None
+
+        # 确保 Live 已启动
+        if self._live is None:
+            self.start()
         self._refresh()
 
     def update_row(
@@ -270,12 +263,8 @@ class LiveTableLogger:
 
         Args:
             phase: "train" 或 "val"
-            data: 指标数据字典，键名对应 columns
-            progress: 进度信息（仅 train 需要），包含：
-                - current: 当前批次索引（从0开始）
-                - total: 总批次数
-                - elapsed: 已用时间（秒）
-                - bar_width: 进度条宽度（可选，默认 20）
+            data: 指标数据字典
+            progress: 进度信息（仅 train 需要）
         """
         if phase == "train":
             self._train_data = data
@@ -289,11 +278,10 @@ class LiveTableLogger:
                 )
         elif phase == "val":
             self._val_data = data
-
         self._refresh()
 
     def end_epoch(self, epoch_time: float):
-        """结束当前 epoch，锁定表格并添加到已完成列表
+        """结束当前 epoch，停止 Live 并打印 Time 信息
 
         Args:
             epoch_time: epoch 耗时（秒）
@@ -301,106 +289,63 @@ class LiveTableLogger:
         if self._current_epoch is None:
             return
 
-        # 创建最终的表格
-        final_table = self._create_table(self._current_epoch, self._current_lr)
+        # 停止 Live（最后刷新的内容会保留在屏幕上）
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
 
-        # 添加 Train 行
-        if self._train_data is not None:
-            train_cells = ["Train -"]
-            for col in self.columns:
-                value = self._train_data.get(col, "")
-                train_cells.append(self._format_value(col, value))
-            # 进度条列（100%完成）
-            progress = self._train_progress or "100%"
-            train_cells.append(progress)
-            final_table.add_row(*train_cells)
+        # 只打印 Time 信息（Live 的内容已保留）
+        self._console.print(f"[dim]Time: {epoch_time:.2f}s[/dim]")
+        self._console.print("")  # 空行分隔
 
-        # 添加 Val 行
-        if self._val_data is not None:
-            val_cells = ["Val   -"]
-            for col in self.columns:
-                value = self._val_data.get(col, "")
-                val_cells.append(self._format_value(col, value))
-            # mAP50 列
-            map50 = self._val_data.get("mAP50")
-            map50_str = f"mAP50: {map50*100:>6.2f}%" if map50 is not None else ""
-            val_cells.append(map50_str)
-            final_table.add_row(*val_cells)
-
-        # 创建 Epoch Time 字符串
-        epoch_time_str = f"[dim]Epoch Time: {epoch_time:.2f}s[/dim]"
-
-        # 将标题、表格和 epoch time 作为元组保存
-        header = self._create_epoch_header(self._current_epoch, self._current_lr)
-        self._completed_tables.append((header, final_table, epoch_time_str))
+        # 确保光标显示（修复 VSCode 终端光标问题）
+        self._console.show_cursor(True)
 
         # 清空当前状态
-        self._current_table = None
         self._current_epoch = None
         self._current_lr = None
         self._train_data = None
         self._val_data = None
         self._train_progress = None
 
-        self._refresh()
-
     def _refresh(self):
-        """刷新显示"""
+        """刷新 Live 显示（只显示当前正在训练的 epoch）"""
         if self._live is None:
             return
 
-        # 构建显示内容：已完成的表格 + 当前正在训练的表格
         content = []
 
-        # 添加已完成的表格
-        for item in self._completed_tables:
-            header, table, epoch_time_str = item  # 解包元组
-            content.append(header)  # 添加标题
-            content.append(table)
-            content.append(epoch_time_str)  # 添加 Epoch Time
-            content.append("")  # 空行分隔
-
-        # 添加当前正在训练的表格（每次重新创建）
         if self._current_epoch is not None:
-            # 添加标题
-            header = self._create_epoch_header(self._current_epoch, self._current_lr)
-            content.append(header)
+            # 标题
+            content.append(self._create_epoch_header(self._current_epoch, self._current_lr))
 
-            # 重新创建当前表格
-            current_display_table = self._create_table(
-                self._current_epoch, self._current_lr
-            )
-
-            # 添加 Train 行
+            # 表格
+            table = self._create_table()
             if self._train_data is not None:
-                train_cells = ["Train -"]
-                for col in self.columns:
-                    value = self._train_data.get(col, "")
-                    train_cells.append(self._format_value(col, value))
-                # 进度条列
-                progress = self._train_progress or ""
-                train_cells.append(progress)
-                current_display_table.add_row(*train_cells)
-
-            # 添加 Val 行
+                self._add_row_to_table(table, "train", self._train_data, self._train_progress)
             if self._val_data is not None:
-                val_cells = ["Val   -"]
-                for col in self.columns:
-                    value = self._val_data.get(col, "")
-                    val_cells.append(self._format_value(col, value))
-                # mAP50 列
-                map50 = self._val_data.get("mAP50")
-                map50_str = f"mAP50: {map50*100:>6.2f}%" if map50 is not None else ""
-                val_cells.append(map50_str)
-                current_display_table.add_row(*val_cells)
+                self._add_row_to_table(table, "val", self._val_data)
+            content.append(table)
 
-            content.append(current_display_table)
-
-        # 更新 Live 显示
         self._live.update(Group(*content))
 
     def stop(self):
-        """停止 LiveTableLogger"""
+        """停止 LiveTableLogger 并恢复终端状态
+
+        使用 try-except 确保即使发生异常也能恢复光标显示。
+        此方法可被多次调用，不会产生副作用。
+        """
+        # 1. 停止 Live 刷新
         if self._live is not None:
-            self._live.stop()
+            try:
+                self._live.stop()
+            except Exception:
+                pass  # 忽略停止时的错误
             self._live = None
+
+        # 2. 强制显示光标（这是关键修复）
+        # 即使 self._live 已经是 None 了，也要确保光标被恢复
+        try:
+            self._console.show_cursor(True)
+        except Exception:
+            pass
