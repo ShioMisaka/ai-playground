@@ -36,11 +36,11 @@ class TrainingLogger:
         """获取 CSV 字段名"""
         base_fields = ['epoch', 'time', 'lr', 'train_loss', 'val_loss']
         if self.is_detection:
-            # 检测任务：添加损失分量和 mAP50
+            # 检测任务：添加损失分量和 mAP50、mAP50-95
             base_fields.extend([
                 'train_box_loss', 'train_cls_loss', 'train_dfl_loss',
                 'val_box_loss', 'val_cls_loss', 'val_dfl_loss',
-                'val_map50'
+                'val_map50', 'val_map50_95'
             ])
         else:
             base_fields.extend(['train_accuracy', 'val_accuracy'])
@@ -78,7 +78,7 @@ class TrainingLogger:
         }
 
         if self.is_detection:
-            # 检测任务：损失分量和 mAP50
+            # 检测任务：损失分量和 mAP50、mAP50-95
             row['train_box_loss'] = f'{train_metrics.get("box_loss", 0):.4f}'
             row['train_cls_loss'] = f'{train_metrics.get("cls_loss", 0):.4f}'
             row['train_dfl_loss'] = f'{train_metrics.get("dfl_loss", 0):.4f}'
@@ -87,9 +87,11 @@ class TrainingLogger:
             row['val_cls_loss'] = f'{val_metrics.get("cls_loss", 0):.4f}'
             row['val_dfl_loss'] = f'{val_metrics.get("dfl_loss", 0):.4f}'
 
-            # mAP50（如果存在）
+            # mAP50 和 mAP50-95（如果存在）
             map50 = val_metrics.get('mAP50', 0)
             row['val_map50'] = f'{map50:.4f}' if map50 >= 0 else ''
+            map50_95 = val_metrics.get('mAP50-95', 0)
+            row['val_map50_95'] = f'{map50_95:.4f}' if map50_95 >= 0 else ''
         else:
             # 分类任务：accuracy
             row['train_accuracy'] = f'{train_metrics.get("accuracy", 0):.4f}'
@@ -191,9 +193,16 @@ class LiveTableLogger:
             cells = ["Val   -"]
             for col in self.columns:
                 cells.append(self._format_value(col, data.get(col, "")))
+            # 显示 mAP50 和 mAP50-95，使用小数格式，精确到小数点后三位
             map50 = data.get("mAP50")
-            map50_str = f"mAP50: {map50*100:>6.2f}%" if map50 is not None else ""
-            cells.append(map50_str)
+            map50_95 = data.get("mAP50-95")
+            if map50 is not None and map50_95 is not None:
+                map_str = f"mAP50: {map50:.3f}  mAP50-95: {map50_95:.3f}"
+            elif map50 is not None:
+                map_str = f"mAP50: {map50:.3f}"
+            else:
+                map_str = ""
+            cells.append(map_str)
         table.add_row(*cells)
 
     def _render_progress_bar(

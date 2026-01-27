@@ -55,68 +55,23 @@ def bbox_iou(box1: np.ndarray, box2: np.ndarray) -> np.ndarray:
     return inter_area / (union_area + 1e-7)
 
 
-def compute_map50(predictions: List[Dict[str, np.ndarray]],
-                  targets: torch.Tensor,
-                  nc: int,
-                  img_size: int = 640,
-                  iou_threshold: float = 0.5,
-                  conf_threshold: float = 0.25) -> Dict[str, float]:
-    """计算 mAP@0.5
+def compute_ap_at_iou(predictions_by_class: Dict[int, List],
+                      gt_by_class: Dict[int, List],
+                      gt_matched: Dict[int, List],
+                      nc: int,
+                      iou_threshold: float) -> Tuple[List[float], List[float], List[float]]:
+    """在指定 IoU 阈值下计算每个类别的 AP
 
     Args:
-        predictions: 预测结果列表，每个元素是 dict，包含:
-            - boxes: [N, 4] (x1, y1, x2, y2) in pixels
-            - scores: [N] 置信度分数
-            - labels: [N] 类别标签
-        targets: 目标张量 [num_boxes, 6] (batch_idx, class_id, x, y, w, h) normalized
+        predictions_by_class: 按类别组织的预测字典
+        gt_by_class: 按类别组织的 GT 框字典
+        gt_matched: 跟踪每个 GT 是否被匹配的字典
         nc: 类别数量
-        iou_threshold: IoU 阈值 (default 0.5 for mAP50)
-        conf_threshold: 置信度阈值
+        iou_threshold: IoU 阈值
 
     Returns:
-        包含 mAP50, precision, recall 等指标的字典
+        (aps, precisions, recalls) 元组
     """
-    device = targets.device
-    targets_np = targets.cpu().numpy()
-
-    # 按类别组织预测和目标
-    pred_by_class = {c: [] for c in range(nc)}
-    gt_by_class = {c: [] for c in range(nc)}
-    gt_matched = {c: [] for c in range(nc)}  # 跟踪每个 GT 是否被匹配
-
-    # 收集所有 batch 的预测和目标
-    for batch_idx, batch_preds in enumerate(predictions):
-        # 获取当前 batch 的目标
-        batch_targets = targets_np[targets_np[:, 0] == batch_idx]
-        if len(batch_targets) == 0 and len(batch_preds.get('boxes', [])) == 0:
-            continue
-
-        # 处理目标 - 转换从 xywh 到 xyxy，并反归一化到像素坐标
-        for gt in batch_targets:
-            class_id = int(gt[1])
-            if 0 <= class_id < nc:
-                x, y, w, h = gt[2:6]
-                # 反归一化到像素坐标
-                x, y, w, h = x * img_size, y * img_size, w * img_size, h * img_size
-                x1, y1 = x - w/2, y - h/2
-                x2, y2 = x + w/2, y + h/2
-                gt_by_class[class_id].append([x1, y1, x2, y2])
-                gt_matched[class_id].append(False)
-
-        # 处理预测
-        if 'boxes' in batch_preds and len(batch_preds['boxes']) > 0:
-            boxes = batch_preds['boxes']  # [N, 4]
-            scores = batch_preds['scores']  # [N]
-            labels = batch_preds['labels']  # [N]
-
-            for box, score, label in zip(boxes, scores, labels):
-                if 0 <= label < nc and score >= conf_threshold:
-                    pred_by_class[int(label)].append({
-                        'box': box,
-                        'score': score
-                    })
-
-    # 计算每个类别的 AP
     aps = []
     precisions = []
     recalls = []
@@ -127,7 +82,7 @@ def compute_map50(predictions: List[Dict[str, np.ndarray]],
             continue  # 没有该类别的目标，跳过
 
         # 获取该类别的预测
-        class_preds = pred_by_class[class_id]
+        class_preds = predictions_by_class[class_id]
         if len(class_preds) == 0:
             # 没有预测，AP = 0
             aps.append(0.0)
@@ -180,18 +135,99 @@ def compute_map50(predictions: List[Dict[str, np.ndarray]],
         precisions.append(precisions_arr[-1] if len(precisions_arr) > 0 else 0)
         recalls.append(recalls_arr[-1] if len(recalls_arr) > 0 else 0)
 
-    # 计算 mAP
-    if len(aps) > 0:
-        mAP50 = np.mean(aps)
-        avg_precision = np.mean(precisions) if len(precisions) > 0 else 0
-        avg_recall = np.mean(recalls) if len(recalls) > 0 else 0
-    else:
-        mAP50 = 0.0
-        avg_precision = 0.0
-        avg_recall = 0.0
+    return aps, precisions, recalls
+
+
+def compute_map50(predictions: List[Dict[str, np.ndarray]],
+                  targets: torch.Tensor,
+                  nc: int,
+                  img_size: int = 640,
+                  iou_threshold: float = 0.5,
+                  conf_threshold: float = 0.25) -> Dict[str, float]:
+    """计算 mAP@0.5 和 mAP@0.5:0.95
+
+    Args:
+        predictions: 预测结果列表，每个元素是 dict，包含:
+            - boxes: [N, 4] (x1, y1, x2, y2) in pixels
+            - scores: [N] 置信度分数
+            - labels: [N] 类别标签
+        targets: 目标张量 [num_boxes, 6] (batch_idx, class_id, x, y, w, h) normalized
+        nc: 类别数量
+        img_size: 图像尺寸
+        iou_threshold: IoU 阈值 (已废弃，保留用于兼容性)
+        conf_threshold: 置信度阈值
+
+    Returns:
+        包含 mAP50, mAP50-95, precision, recall 等指标的字典
+    """
+    device = targets.device
+    targets_np = targets.cpu().numpy()
+
+    # 按类别组织预测和目标
+    pred_by_class = {c: [] for c in range(nc)}
+    gt_by_class = {c: [] for c in range(nc)}
+    gt_matched = {c: [] for c in range(nc)}  # 跟踪每个 GT 是否被匹配
+
+    # 收集所有 batch 的预测和目标
+    for batch_idx, batch_preds in enumerate(predictions):
+        # 获取当前 batch 的目标
+        batch_targets = targets_np[targets_np[:, 0] == batch_idx]
+        if len(batch_targets) == 0 and len(batch_preds.get('boxes', [])) == 0:
+            continue
+
+        # 处理目标 - 转换从 xywh 到 xyxy，并反归一化到像素坐标
+        for gt in batch_targets:
+            class_id = int(gt[1])
+            if 0 <= class_id < nc:
+                x, y, w, h = gt[2:6]
+                # 反归一化到像素坐标
+                x, y, w, h = x * img_size, y * img_size, w * img_size, h * img_size
+                x1, y1 = x - w/2, y - h/2
+                x2, y2 = x + w/2, y + h/2
+                gt_by_class[class_id].append([x1, y1, x2, y2])
+                gt_matched[class_id].append(False)
+
+        # 处理预测
+        if 'boxes' in batch_preds and len(batch_preds['boxes']) > 0:
+            boxes = batch_preds['boxes']  # [N, 4]
+            scores = batch_preds['scores']  # [N]
+            labels = batch_preds['labels']  # [N]
+
+            for box, score, label in zip(boxes, scores, labels):
+                if 0 <= label < nc and score >= conf_threshold:
+                    pred_by_class[int(label)].append({
+                        'box': box,
+                        'score': score
+                    })
+
+    # 计算不同 IoU 阈值下的 mAP
+    # mAP@0.5:0.95 使用 10 个 IoU 阈值: 0.5, 0.55, 0.6, ..., 0.95
+    iou_thresholds = np.linspace(0.5, 0.95, 10)
+
+    # 首先计算 mAP50 (IoU=0.5)
+    aps_50, precisions_50, recalls_50 = compute_ap_at_iou(
+        pred_by_class, gt_by_class, gt_matched, nc, iou_threshold=0.5
+    )
+
+    mAP50 = np.mean(aps_50) if len(aps_50) > 0 else 0.0
+    avg_precision = np.mean(precisions_50) if len(precisions_50) > 0 else 0
+    avg_recall = np.mean(recalls_50) if len(recalls_50) > 0 else 0
+
+    # 计算 mAP@0.5:0.95
+    all_aps = []
+    for iou_thr in iou_thresholds:
+        # 为每个阈值创建新的 gt_matched 副本
+        gt_matched_copy = {c: matched.copy() for c, matched in gt_matched.items()}
+        aps, _, _ = compute_ap_at_iou(
+            pred_by_class, gt_by_class, gt_matched_copy, nc, iou_threshold=iou_thr
+        )
+        all_aps.extend(aps)
+
+    mAP50_95 = np.mean(all_aps) if len(all_aps) > 0 else 0.0
 
     return {
         'mAP50': mAP50,
+        'mAP50-95': mAP50_95,
         'precision': avg_precision,
         'recall': avg_recall
     }

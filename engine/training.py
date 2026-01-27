@@ -253,6 +253,7 @@ def print_metrics(
                     "cls_loss": val_metrics.get("cls_loss", 0),
                     "dfl_loss": val_metrics.get("dfl_loss", 0),
                     "mAP50": val_metrics.get("mAP50"),
+                    "mAP50-95": val_metrics.get("mAP50-95"),
                 },
             )
         else:
