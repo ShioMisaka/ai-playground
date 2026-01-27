@@ -5,7 +5,7 @@
 """
 import time
 import torch
-from typing import Optional, Dict, TYPE_CHECKING
+from typing import Optional, Dict, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from utils import LiveTableLogger
@@ -48,6 +48,7 @@ def train_one_epoch(
     total_epochs,
     nc: Optional[int] = None,
     live_logger: Optional["LiveTableLogger"] = None,
+    ema: Optional[Any] = None,
 ):
     """训练一个 epoch
 
@@ -60,6 +61,7 @@ def train_one_epoch(
         total_epochs: 总 epoch 数
         nc: 类别数量（用于计算准确率）
         live_logger: LiveTableLogger 实例（可选），用于动态表格显示
+        ema: ModelEMA 实例（可选），用于更新 EMA 权重
 
     Returns:
         dict: 包含 loss, box_loss, cls_loss, dfl_loss, accuracy/mAP 等指标的字典
@@ -123,6 +125,10 @@ def train_one_epoch(
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
 
         optimizer.step()
+
+        # 更新 EMA 权重
+        if ema is not None:
+            ema.update(model)
 
         # Use loss_items for printing (not multiplied by batch_size)
         if loss_items is not None:

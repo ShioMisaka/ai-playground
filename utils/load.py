@@ -5,6 +5,7 @@ from PIL import Image
 from pathlib import Path
 from torchvision import datasets, transforms
 from torch.utils.data import Dataset, DataLoader
+from typing import Optional, Any
 
 def get_data_loader(path : str, is_train: bool):
     to_tensor = transforms.Compose([transforms.ToTensor()])
@@ -13,19 +14,21 @@ def get_data_loader(path : str, is_train: bool):
 
 class YOLODataset(Dataset):
     """YOLO格式数据集加载器"""
-    
-    def __init__(self, img_dir, label_dir, img_size=640, augment=False):
+
+    def __init__(self, img_dir, label_dir, img_size=640, augment=False, transform=None):
         """
         Args:
             img_dir: 图片目录路径
             label_dir: 标签目录路径
             img_size: 输入图像尺寸
-            augment: 是否进行数据增强
+            augment: 是否进行数据增强（保留用于兼容）
+            transform: 自定义数据增强变换（Mosaic, Mixup 等）
         """
         self.img_dir = Path(img_dir)
         self.label_dir = Path(label_dir)
         self.img_size = img_size
         self.augment = augment
+        self.transform = transform
         
         # 获取所有图片文件
         self.img_files = []
@@ -45,28 +48,27 @@ class YOLODataset(Dataset):
     
     def __len__(self):
         return len(self.img_files)
-    
-    def __getitem__(self, idx):
-        # 加载图片
+
+    def _load_raw_item(self, idx: int):
+        """加载原始图片和标签（不经过 transform，避免 Mosaic 递归）
+
+        Args:
+            idx: 样本索引
+
+        Returns:
+            (img, boxes): PIL Image 和归一化坐标的 boxes 张量
+        """
         img_path = self.img_files[idx]
         img = Image.open(img_path).convert('RGB')
-        orig_w, orig_h = img.size
-        
-        # 调整图片大小
-        img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
-        img = np.array(img).astype(np.float32) / 255.0
-        img = torch.from_numpy(img).permute(2, 0, 1)  # HWC -> CHW
-        
-        # 加载标签
+
         label_path = self.label_files[idx]
         boxes = []
-        
+
         if label_path.exists():
             with open(label_path, 'r') as f:
                 for line in f.readlines():
                     line = line.strip()
                     if line:
-                        # YOLO格式: class_id x_center y_center width height (归一化坐标)
                         values = line.split()
                         class_id = int(values[0])
                         x_center = float(values[1])
@@ -74,14 +76,28 @@ class YOLODataset(Dataset):
                         width = float(values[3])
                         height = float(values[4])
                         boxes.append([class_id, x_center, y_center, width, height])
-        
+
         if len(boxes) == 0:
-            # 没有标注框，创建空张量
             boxes = torch.zeros((0, 5), dtype=torch.float32)
         else:
             boxes = torch.tensor(boxes, dtype=torch.float32)
-        
-        return img, boxes, str(img_path)
+
+        return img, boxes
+
+    def __getitem__(self, idx):
+        # 加载原始图片和标签
+        img, boxes = self._load_raw_item(idx)
+
+        # 应用数据增强（Mosaic, Mixup 等）
+        if self.transform is not None:
+            img, boxes = self.transform(img, boxes)
+
+        # 调整图片大小
+        img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
+        img = np.array(img).astype(np.float32) / 255.0
+        img = torch.from_numpy(img).permute(2, 0, 1)  # HWC -> CHW
+
+        return img, boxes, str(self.img_files[idx])
 
 def load_yaml_config(yaml_path):
     """加载YAML配置文件"""

@@ -12,8 +12,10 @@ from rich.console import Console
 
 from .training import train_one_epoch, print_metrics
 from .validate import validate
+from .ema import ModelEMA
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
                    print_training_info, print_model_summary, print_detection_header)
+from utils.transforms import MosaicTransform
 
 
 def _create_optimizer(model, lr: float):
@@ -66,7 +68,8 @@ def _save_checkpoint(model, optimizer, epoch, loss, save_path: Path):
 
 
 def train(model, config_path, epochs=100, batch_size=16, img_size=640,
-          lr=0.001, device='cuda', save_dir='runs/train'):
+          lr=0.001, device='cuda', save_dir='runs/train',
+          use_ema=True, use_mosaic=True, close_mosaic=10):
     """完整训练流程
 
     Args:
@@ -78,6 +81,9 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
         lr: 学习率
         device: 设备
         save_dir: 保存目录
+        use_ema: 是否使用 EMA（指数移动平均）
+        use_mosaic: 是否使用 Mosaic 数据增强
+        close_mosaic: 最后 N 个 epoch 关闭 Mosaic（默认 10）
 
     Returns:
         训练后的模型
@@ -97,6 +103,20 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
         workers=0
     )
 
+    # 添加 Mosaic 增强到训练数据集
+    if use_mosaic and epochs > close_mosaic:
+        mosaic_transform = MosaicTransform(
+            dataset=train_loader.dataset,
+            img_size=img_size,
+            prob=1.0,  # 训练时始终应用
+            enable=True
+        )
+        train_loader.dataset.transform = mosaic_transform
+        print(f"Mosaic 增强: 启用 (最后 {close_mosaic} 个 epoch 关闭)")
+    else:
+        mosaic_transform = None
+        print("Mosaic 增强: 禁用")
+
     nc = config.get('nc')  # 类别数量
 
     print(f"类别数: {nc}")
@@ -115,6 +135,14 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     # 创建优化器和调度器
     optimizer = _create_optimizer(model, lr)
     scheduler = _create_scheduler(optimizer, epochs)
+
+    # 创建 EMA
+    ema = None
+    if use_ema:
+        ema = ModelEMA(model, decay=0.9999)
+        print("EMA: 启用 (decay=0.9999)")
+    else:
+        print("EMA: 禁用")
 
     # 初始化日志记录器
     is_detection = hasattr(model, 'detect')
@@ -145,17 +173,23 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
 
                 epoch_start_time = time.time()
 
+                # 关闭 Mosaic（最后 N 个 epoch）
+                if mosaic_transform is not None and epoch == epochs - close_mosaic:
+                    mosaic_transform.enable = False
+                    print(f"\n[Epoch {epoch + 1}] 关闭 Mosaic 增强，使用原始数据精调")
+
                 # 训练一个 epoch
                 train_metrics = train_one_epoch(
-                    model, train_loader, optimizer, device, epoch + 1, epochs, nc=nc, live_logger=live_logger
+                    model, train_loader, optimizer, device, epoch + 1, epochs, nc=nc, live_logger=live_logger, ema=ema
                 )
 
                 # 定期清理内存
                 if device.type == 'cuda':
                     torch.cuda.empty_cache()
 
-                # 验证
-                val_metrics = validate(model, val_loader, device, nc=nc, img_size=img_size)
+                # 验证（使用 EMA 模型）
+                val_model = ema.ema if ema is not None else model
+                val_metrics = validate(val_model, val_loader, device, nc=nc, img_size=img_size)
 
                 # 清理内存
                 if device.type == 'cuda':
@@ -180,10 +214,12 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
                 # 保存最佳模型
                 if val_metrics["loss"] < best_loss:
                     best_loss = val_metrics["loss"]
-                    _save_checkpoint(model, optimizer, epoch, best_loss, save_dir / "best.pt")
+                    save_model = ema.ema if ema is not None else model
+                    _save_checkpoint(save_model, optimizer, epoch, best_loss, save_dir / "best.pt")
 
-                # 保存最后一个 epoch
-                _save_checkpoint(model, optimizer, epoch, val_metrics["loss"], save_dir / "last.pt")
+                # 保存最后一个 epoch（使用 EMA 模型）
+                save_model = ema.ema if ema is not None else model
+                _save_checkpoint(save_model, optimizer, epoch, val_metrics["loss"], save_dir / "last.pt")
 
     except KeyboardInterrupt:
         # 捕获 Ctrl+C，优雅地中断训练
