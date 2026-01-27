@@ -128,6 +128,22 @@ plot_training_curves('runs/training.csv', save_dir='runs')
 - `T_mult=2`: 周期长度倍增
 - `eta_min=1e-6`: 最小学习率
 
+### TaskAlignedAssigner (TAL) 关键参数
+
+**TAL 是 YOLOv8/v11 的核心正样本分配策略**，直接影响 Box Loss 收敛：
+
+| Parameter | Value | 说明 |
+|-----------|-------|------|
+| `topk` | 13 | 每个 GT 选取的候选正样本数（官方: 10-13） |
+| `alpha` | 0.5 | 分类分数权重 |
+| `beta` | 6.0 | **IoU 指数权重（关键！）- 官方 6.0** |
+| Soft Labels | Yes | 使用归一化对齐分数作为目标，而非硬标签 1.0 |
+
+**为什么 beta=6.0 很重要？**
+- `beta=2.0`（旧值）：过于宽松，容忍 IoU 低的框作为正样本
+- `beta=6.0`（官方）：严格，只有 IoU 高的框才能获得高分
+- 低质量匹配会导致 Box Loss 难以收敛，mAP50 停滞在 50-70%
+
 ### Detection Head Mode Handling
 
 检测头在不同模式下返回不同格式：

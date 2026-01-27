@@ -364,19 +364,20 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, WIoU=Fal
 
 
 class TaskAlignedAssigner(nn.Module):
-    """Task-Aligned Assigner for anchor-free detection
+    """Task-Aligned Assigner for anchor-free detection with Soft Labels
 
     Assigns targets based on alignment between classification and localization.
     Follows the TAL (Task-Aligned Learning) principle from TOOD.
+    Uses soft labels for better gradient flow.
     """
 
-    def __init__(self, topk=64, num_classes=80, alpha=0.5, beta=2.0):
+    def __init__(self, topk=13, num_classes=80, alpha=0.5, beta=6.0):
         """
         Args:
-            topk: number of top candidates to select per GT
+            topk: number of top candidates to select per GT (official: 10 or 13)
             num_classes: number of classes
             alpha: weight for alignment score (classification)
-            beta: exponent for alignment score (localization)
+            beta: exponent for alignment score (localization) - official: 6.0
         """
         super().__init__()
         self.topk = topk
@@ -398,93 +399,90 @@ class TaskAlignedAssigner(nn.Module):
         Returns:
             target_labels: (bs, n_points) target labels
             target_bboxes: (bs, n_points, 4) target bboxes in xyxy format
-            target_scores: (bs, n_points, nc) target scores (soft labels)
+            target_scores: (bs, n_points, nc) target scores (soft labels, normalized)
             fg_mask: (bs, n_points) foreground mask
             target_gt_idx: (bs, n_points) assigned GT index
         """
         bs, n_points = pd_scores.shape[:2]
-        device = pd_scores.device
 
         # Get valid GT boxes
         mask_gt = mask_gt.squeeze(-1)  # (bs, n_gt)
         gt_labels = gt_labels.squeeze(-1)  # (bs, n_gt)
 
-        # Compute alignment metrics
-        align_metrics = self._compute_alignment_metrics(
+        # 1. 计算对齐度量
+        align_metrics, overlaps = self._compute_alignment_metrics(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_gt
-        )  # (bs, n_gt, n_points)
+        )
 
-        # Select top-k candidates for each GT
+        # 2. 选择 Top-K 候选
         mask_pos, target_gt_idx = self._select_topk_candidates(
-            align_metrics, mask_gt
-        )  # mask_pos: (bs, n_gt, n_points)
+            align_metrics, overlaps, mask_gt
+        )
 
-        # Assign targets
+        # 3. 分配 Target (使用 Soft Labels)
         target_labels, target_bboxes, target_scores = self._assign_targets(
-            pd_scores, gt_labels, gt_bboxes, mask_pos, target_gt_idx, mask_gt
+            align_metrics, gt_labels, gt_bboxes, mask_pos, target_gt_idx, mask_gt
         )
 
         # Foreground mask
-        fg_mask = mask_pos.sum(dim=1) > 0  # (bs, n_points)
+        fg_mask = mask_pos.sum(dim=1) > 0
 
         return target_labels, target_bboxes, target_scores, fg_mask, target_gt_idx
 
     def _compute_alignment_metrics(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_gt):
-        """Compute alignment scores between predictions and GT
+        """Compute alignment scores and IoU overlaps
 
-        Alignment = (cls_score^alpha) * (IoU^beta)
+        Returns:
+            align_metrics: (bs, n_gt, n_points) alignment scores
+            overlaps: (bs, n_gt, n_points) IoU values
         """
         bs, n_points, nc = pd_scores.shape
         n_gt = gt_labels.shape[1]
         device = pd_scores.device
 
-        pd_scores = pd_scores.sigmoid()  # (bs, n_points, nc)
+        pd_scores = pd_scores.sigmoid()
 
-        # Create alignment matrix
+        # 初始化
         align_metrics = torch.zeros(bs, n_gt, n_points, device=device)
+        overlaps = torch.zeros(bs, n_gt, n_points, device=device)
 
         for b in range(bs):
-            valid_gt = mask_gt[b]  # (n_gt,)
+            valid_gt = mask_gt[b]
             if not valid_gt.any():
                 continue
 
             valid_gt_idx = valid_gt.nonzero(as_tuple=True)[0]
-            for gt_idx in valid_gt_idx:
-                gt_cls = gt_labels[b, gt_idx].item()  # class index
+            if len(valid_gt_idx) > 0:
+                gt_bboxes_batch = gt_bboxes[b, valid_gt_idx]  # (n_valid_gt, 4)
+                gt_labels_batch = gt_labels[b, valid_gt_idx]  # (n_valid_gt,)
 
-                # Classification score for this class: (n_points,)
-                cls_score = pd_scores[b, :, gt_cls]
+                # 获取对应类别的分数 (n_valid_gt, n_points)
+                bbox_scores = pd_scores[b, :, gt_labels_batch.long()].T
 
-                # Compute IoU between all predictions and this GT bbox
-                # pd_bboxes[b]: (n_points, 4), gt_bboxes[b, gt_idx]: (4,)
-                # Need to expand gt_bbox to (n_points, 4) for pairwise computation
-                gt_bbox_expanded = gt_bboxes[b:b+1, gt_idx:gt_idx+1, :].expand(-1, n_points, -1)  # (1, n_points, 4)
-                gt_bbox_flat = gt_bbox_expanded.reshape(-1, 4)  # (n_points, 4)
-                pd_bbox_flat = pd_bboxes[b]  # (n_points, 4)
+                # 计算 IoU (n_valid_gt, n_points)
+                # 批量计算所有 valid GT 的 IoU
+                gt_boxes_expanded = gt_bboxes_batch.unsqueeze(1).expand(-1, n_points, -1).reshape(-1, 4)
+                pd_boxes_repeated = pd_bboxes[b].repeat(len(valid_gt_idx), 1)
 
-                # Compute IoU: returns (n_points, n_points) but we want diagonal
-                iou_matrix = bbox_iou(pd_bbox_flat, gt_bbox_flat, xywh=False, CIoU=False)  # (n_points, n_points)
-                iou_score = iou_matrix.diag()  # (n_points,)
+                ious = bbox_iou(gt_boxes_expanded, pd_boxes_repeated, xywh=False, CIoU=False)
+                ious = ious.reshape(len(valid_gt_idx), n_points)
 
-                # Alignment score: (cls_score^alpha) * (IoU^beta)
-                # Note: We don't filter by IoU > 0 because initial predictions may have no overlap
-                # The top-k selection will naturally pick the best candidates
-                # Add epsilon before exponentiation to avoid zero values
-                alignment = ((cls_score + 1e-5) ** self.alpha) * ((iou_score.abs() + 1e-5) ** self.beta)
-                align_metrics[b, gt_idx, :] = alignment
+                overlaps[b, valid_gt_idx] = ious
 
-        return align_metrics
+                # 计算 Alignment metric
+                align_metric = (bbox_scores.pow(self.alpha) * ious.pow(self.beta))
+                align_metrics[b, valid_gt_idx] = align_metric
 
-    def _select_topk_candidates(self, align_metrics, mask_gt):
-        """Select top-k candidates for each GT"""
+        return align_metrics, overlaps
+
+    def _select_topk_candidates(self, align_metrics, overlaps, mask_gt):
+        """Select top-k candidates for each GT, filtering by IoU > 0"""
         bs, n_gt, n_points = align_metrics.shape
         device = align_metrics.device
 
-        # Get top-k indices
-        topk_metrics, topk_idxs = torch.topk(align_metrics, self.topk, dim=-1)
-        # topk_idxs: (bs, n_gt, topk)
+        # topk metrics: (bs, n_gt, topk)
+        topk_metrics, topk_idxs = torch.topk(align_metrics, self.topk, dim=-1, largest=True)
 
-        # Create mask
         mask_pos = torch.zeros(bs, n_gt, n_points, dtype=torch.bool, device=device)
         target_gt_idx = torch.zeros(bs, n_points, dtype=torch.long, device=device)
 
@@ -494,21 +492,25 @@ class TaskAlignedAssigner(nn.Module):
                 continue
 
             valid_gt_idx = valid_gt.nonzero(as_tuple=True)[0]
-            for gt_i, gt_idx in enumerate(valid_gt_idx):
-                idxs = topk_idxs[b, gt_i, :]  # (topk,)
-                mask_pos[b, gt_idx, idxs] = True
-                target_gt_idx[b, idxs] = gt_idx
+            for gt_i in valid_gt_idx:
+                # 过滤掉 IoU <= 0 的负样本，即使它们在 topk 中
+                is_in_topk = torch.zeros(n_points, dtype=torch.bool, device=device)
+                is_in_topk[topk_idxs[b, gt_i]] = True
 
-        # Additional filtering: ensure selected points have positive overlap
-        # This prevents selecting points that are far outside the bbox
-        # We use the overlaps tensor from the parent context to filter
+                # 要求 metrics > 0 且 overlaps > 0.01 (避免极差的匹配)
+                pos_mask = is_in_topk & (overlaps[b, gt_i] > 0.01)
+
+                mask_pos[b, gt_i] = pos_mask
+                if pos_mask.any():
+                    target_gt_idx[b, pos_mask] = gt_i
 
         return mask_pos, target_gt_idx
 
-    def _assign_targets(self, pd_scores, gt_labels, gt_bboxes, mask_pos, target_gt_idx, mask_gt):
-        """Assign targets based on positive positions"""
-        bs, n_points, nc = pd_scores.shape
-        device = pd_scores.device
+    def _assign_targets(self, align_metrics, gt_labels, gt_bboxes, mask_pos, target_gt_idx, mask_gt):
+        """Assign targets with soft label normalization"""
+        bs, n_points = align_metrics.shape[0], align_metrics.shape[2]
+        nc = self.num_classes
+        device = align_metrics.device
 
         target_labels = torch.zeros(bs, n_points, dtype=torch.long, device=device)
         target_bboxes = torch.zeros(bs, n_points, 4, device=device)
@@ -519,21 +521,36 @@ class TaskAlignedAssigner(nn.Module):
             if not valid_gt.any():
                 continue
 
+            target_gt_idx_b = target_gt_idx[b]
+            mask_pos_b = mask_pos[b]  # (n_gt, n_points)
+            is_pos = mask_pos_b.sum(0) > 0  # (n_points,)
+
+            if not is_pos.any():
+                continue
+
+            # --- Soft Label Normalization (关键修正) ---
+            # 获取每个 GT 的最大对齐分，用于归一化
+            align_metric_max = align_metrics[b].max(dim=-1, keepdim=True)[0]  # (n_gt, 1)
+            # 归一化: metrics / max_metrics
+            norm_align_metric = (align_metrics[b] * mask_pos_b) / (align_metric_max + 1e-9)
+
             valid_gt_idx = valid_gt.nonzero(as_tuple=True)[0]
-            for gt_i, gt_idx in enumerate(valid_gt_idx):
-                mask = mask_pos[b, gt_idx]  # (n_points,)
+            for gt_idx in valid_gt_idx:
+                # 该 GT 匹配到的 anchors
+                mask = mask_pos_b[gt_idx]
                 if mask.sum() == 0:
                     continue
 
-                # Assign labels
-                target_labels[b, mask] = gt_labels[b, gt_idx]
+                # 对应的类别
+                cls_idx = gt_labels[b, gt_idx].long()
 
-                # Assign bboxes
+                # 赋值 Label 和 Bbox
+                target_labels[b, mask] = cls_idx
                 target_bboxes[b, mask] = gt_bboxes[b, gt_idx]
 
-                # Assign scores (soft label based on overlap)
-                cls_idx = gt_labels[b, gt_idx]
-                target_scores[b, mask, cls_idx] = 1.0
+                # 赋值 Soft Scores (核心修复)
+                # 只有属于该 GT 的 mask 位置才会被赋值为该 GT 的 norm_align_metric
+                target_scores[b, mask, cls_idx] = norm_align_metric[gt_idx, mask]
 
         return target_labels, target_bboxes, target_scores
 
@@ -681,8 +698,8 @@ class YOLOLossAnchorFree(nn.Module):
         # Strides for each scale
         self.stride = torch.tensor([8., 16., 32.])
 
-        # Task-aligned assigner
-        self.assigner = TaskAlignedAssigner(topk=64, num_classes=num_classes, alpha=0.5, beta=2.0)
+        # Task-aligned assigner (使用官方推荐参数: beta=6.0, topk=13)
+        self.assigner = TaskAlignedAssigner(topk=13, num_classes=num_classes, alpha=0.5, beta=6.0)
 
         # Bbox loss (IoU + DFL)
         self.bbox_loss = BboxLoss(reg_max) if use_dfl else None
