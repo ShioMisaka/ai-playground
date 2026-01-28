@@ -26,8 +26,8 @@ from utils import plot_training_curves
 
 def main():
 
-    csv_path = "outputs/train/exp1v11/training_log.csv"
-    save_dir = "outputs/train/exp1v11/"
+    csv_path = "outputs/train/exp1_2/training_log.csv"
+    save_dir = "outputs/train/exp1_2/"
 
 
     # 检查 CSV 文件是否存在
