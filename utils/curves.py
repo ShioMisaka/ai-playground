@@ -68,25 +68,25 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
     """
     df = _load_and_clean_csv(csv_path)
 
-    # 检测任务特有的损失列
+    # 检测任务特有的损失列（支持新旧格式）
     train_cols = {
-        'box': _get_column(df, ['train_box_loss', 'train_box']),
-        'cls': _get_column(df, ['train_cls_loss', 'train_cls']),
-        'dfl': _get_column(df, ['train_dfl_loss', 'train_dfl']),
+        'box': _get_column(df, ['train/box_loss', 'train_box_loss', 'train_box']),
+        'cls': _get_column(df, ['train/cls_loss', 'train_cls_loss', 'train_cls']),
+        'dfl': _get_column(df, ['train/dfl_loss', 'train_dfl_loss', 'train_dfl']),
     }
     val_cols = {
-        'box': _get_column(df, ['val_box_loss', 'val_box']),
-        'cls': _get_column(df, ['val_cls_loss', 'val_cls']),
-        'dfl': _get_column(df, ['val_dfl_loss', 'val_dfl']),
+        'box': _get_column(df, ['val/box_loss', 'val_box_loss', 'val_box']),
+        'cls': _get_column(df, ['val/cls_loss', 'val_cls_loss', 'val_cls']),
+        'dfl': _get_column(df, ['val/dfl_loss', 'val_dfl_loss', 'val_dfl']),
     }
 
-    # 计算 total_loss（如果不存在）
-    train_total = _get_column(df, ['train_loss', 'train_total_loss'])
+    # 计算 total_loss（如果不存在，支持新旧格式）
+    train_total = _get_column(df, ['train/loss', 'train_loss', 'train_total_loss'])
     if train_total is None and all(v is not None for v in train_cols.values()):
         df['train_total_loss'] = df[train_cols['box']] + df[train_cols['cls']] + df[train_cols['dfl']]
         train_total = 'train_total_loss'
 
-    val_total = _get_column(df, ['val_loss', 'val_total_loss'])
+    val_total = _get_column(df, ['val/loss', 'val_loss', 'val_total_loss'])
     if val_total is None and all(v is not None for v in val_cols.values()):
         df['val_total_loss'] = df[val_cols['box']] + df[val_cols['cls']] + df[val_cols['dfl']]
         val_total = 'val_total_loss'
@@ -167,9 +167,9 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
     """
     df = _load_and_clean_csv(csv_path)
 
-    # 查找 mAP 列
-    map50_col = _get_column(df, ['val_map50', 'map50', 'mAP50', 'metrics/mAP50(B)'])
-    map50_95_col = _get_column(df, ['val_map50_95', 'map50_95', 'mAP50-95', 'metrics/mAP50-95(B)'])
+    # 查找 mAP 列（支持新旧格式）
+    map50_col = _get_column(df, ['metrics/mAP50(B)', 'val_map50', 'map50', 'mAP50'])
+    map50_95_col = _get_column(df, ['metrics/mAP50-95(B)', 'val_map50_95', 'map50_95', 'mAP50-95'])
 
     # 检查是否有 mAP 数据
     if map50_col is None and map50_95_col is None:

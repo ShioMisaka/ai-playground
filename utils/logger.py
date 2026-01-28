@@ -33,17 +33,17 @@ class TrainingLogger:
         self._fieldnames: Optional[list] = None
 
     def _get_fieldnames(self) -> list:
-        """获取 CSV 字段名"""
-        base_fields = ['epoch', 'time', 'lr', 'train_loss', 'val_loss']
+        """获取 CSV 字段名（YOLO 风格：使用斜杠层级）"""
+        base_fields = ['epoch', 'time', 'lr', 'train/loss', 'val/loss']
         if self.is_detection:
-            # 检测任务：添加损失分量和 mAP50、mAP50-95
+            # 检测任务：添加损失分量和 mAP 指标
             base_fields.extend([
-                'train_box_loss', 'train_cls_loss', 'train_dfl_loss',
-                'val_box_loss', 'val_cls_loss', 'val_dfl_loss',
-                'val_map50', 'val_map50_95'
+                'train/box_loss', 'train/cls_loss', 'train/dfl_loss',
+                'val/box_loss', 'val/cls_loss', 'val/dfl_loss',
+                'metrics/mAP50(B)', 'metrics/mAP50-95(B)'
             ])
         else:
-            base_fields.extend(['train_accuracy', 'val_accuracy'])
+            base_fields.extend(['train/accuracy', 'val/accuracy'])
         return base_fields
 
     def open(self):
@@ -73,29 +73,29 @@ class TrainingLogger:
             'epoch': epoch,
             'time': f'{epoch_time:.2f}',
             'lr': f'{lr:.6f}',
-            'train_loss': f'{train_metrics["loss"]:.4f}',
-            'val_loss': f'{val_metrics["loss"]:.4f}'
+            'train/loss': f'{train_metrics["loss"]:.4f}',
+            'val/loss': f'{val_metrics["loss"]:.4f}'
         }
 
         if self.is_detection:
-            # 检测任务：损失分量和 mAP50、mAP50-95
-            row['train_box_loss'] = f'{train_metrics.get("box_loss", 0):.4f}'
-            row['train_cls_loss'] = f'{train_metrics.get("cls_loss", 0):.4f}'
-            row['train_dfl_loss'] = f'{train_metrics.get("dfl_loss", 0):.4f}'
+            # 检测任务：损失分量和 mAP 指标
+            row['train/box_loss'] = f'{train_metrics.get("box_loss", 0):.4f}'
+            row['train/cls_loss'] = f'{train_metrics.get("cls_loss", 0):.4f}'
+            row['train/dfl_loss'] = f'{train_metrics.get("dfl_loss", 0):.4f}'
 
-            row['val_box_loss'] = f'{val_metrics.get("box_loss", 0):.4f}'
-            row['val_cls_loss'] = f'{val_metrics.get("cls_loss", 0):.4f}'
-            row['val_dfl_loss'] = f'{val_metrics.get("dfl_loss", 0):.4f}'
+            row['val/box_loss'] = f'{val_metrics.get("box_loss", 0):.4f}'
+            row['val/cls_loss'] = f'{val_metrics.get("cls_loss", 0):.4f}'
+            row['val/dfl_loss'] = f'{val_metrics.get("dfl_loss", 0):.4f}'
 
-            # mAP50 和 mAP50-95（如果存在）
+            # mAP 指标（如果存在）
             map50 = val_metrics.get('mAP50', 0)
-            row['val_map50'] = f'{map50:.4f}' if map50 >= 0 else ''
+            row['metrics/mAP50(B)'] = f'{map50:.4f}' if map50 >= 0 else ''
             map50_95 = val_metrics.get('mAP50-95', 0)
-            row['val_map50_95'] = f'{map50_95:.4f}' if map50_95 >= 0 else ''
+            row['metrics/mAP50-95(B)'] = f'{map50_95:.4f}' if map50_95 >= 0 else ''
         else:
             # 分类任务：accuracy
-            row['train_accuracy'] = f'{train_metrics.get("accuracy", 0):.4f}'
-            row['val_accuracy'] = f'{val_metrics.get("accuracy", 0):.4f}'
+            row['train/accuracy'] = f'{train_metrics.get("accuracy", 0):.4f}'
+            row['val/accuracy'] = f'{val_metrics.get("accuracy", 0):.4f}'
 
         self._writer.writerow(row)
         self._file.flush()
