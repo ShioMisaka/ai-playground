@@ -14,7 +14,7 @@ from .training import train_one_epoch, print_metrics
 from .validate import validate
 from .ema import ModelEMA
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
-                   print_training_info, print_model_summary, print_detection_header)
+                   print_training_info, print_model_summary, print_detection_header, get_save_dir)
 from utils.transforms import MosaicTransform
 
 
@@ -88,9 +88,9 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     # 打印训练配置信息
     print_training_info(config_path, epochs, batch_size, img_size, lr, device, save_dir)
 
-    # 创建保存目录
-    save_dir = Path(save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
+    # 创建保存目录（自动递增避免冲突）
+    save_dir = get_save_dir(save_dir)
+    print(f"保存目录: {save_dir}")
 
     # 创建数据加载器
     train_loader, val_loader, config = create_dataloaders(

@@ -18,5 +18,5 @@ trained_model = train(
     img_size=640,
     lr=0.001,  # 修复：从0.01降低到0.001，避免warmup期间学习率过高
     device='cuda',
-    save_dir='outputs/train/exp1v11'
+    save_dir='outputs/train/exp1'
 )
