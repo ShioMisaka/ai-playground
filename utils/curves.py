@@ -1,172 +1,311 @@
 """
 训练曲线可视化模块
 
-提供训练过程中的曲线绘制功能。
+提供训练过程中的曲线绘制功能，使用 pandas 读取 CSV 并生成独立图表。
 """
-import csv
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
+import pandas as pd
+import seaborn as sns
+
+
+# 设置样式
+sns.set_style("whitegrid")
+plt.rcParams['font.size'] = 10
+plt.rcParams['axes.labelsize'] = 11
+plt.rcParams['axes.titlesize'] = 12
+plt.rcParams['legend.fontsize'] = 9
+plt.rcParams['figure.dpi'] = 100
+
+# 颜色方案（从 seaborn 调色板）
+COLORS = sns.color_palette("husl", 8)
+
+
+def _load_and_clean_csv(csv_path: Path) -> pd.DataFrame:
+    """读取并清洗 CSV 文件
+
+    Args:
+        csv_path: CSV 文件路径
+
+    Returns:
+        清洗后的 DataFrame
+    """
+    df = pd.read_csv(csv_path)
+
+    # 去除列名的首尾空格
+    df.columns = df.columns.str.strip()
+
+    return df
+
+
+def _get_column(df: pd.DataFrame, possible_names: list) -> str | None:
+    """尝试从多个可能的列名中获取存在的列
+
+    Args:
+        df: DataFrame
+        possible_names: 可能的列名列表
+
+    Returns:
+        找到的列名，未找到则返回 None
+    """
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return None
+
+
+def plot_loss_analysis(csv_path: Path, save_dir: Path):
+    """绘制 Loss 曲线图 (2x4 布局)
+
+    第一行：Train 的 box_loss, cls_loss, dfl_loss, total_loss
+    第二行：Val 的 box_loss, cls_loss, dfl_loss, total_loss
+
+    Args:
+        csv_path: CSV 文件路径
+        save_dir: 保存目录
+    """
+    df = _load_and_clean_csv(csv_path)
+
+    # 检测任务特有的损失列
+    train_cols = {
+        'box': _get_column(df, ['train_box_loss', 'train_box']),
+        'cls': _get_column(df, ['train_cls_loss', 'train_cls']),
+        'dfl': _get_column(df, ['train_dfl_loss', 'train_dfl']),
+    }
+    val_cols = {
+        'box': _get_column(df, ['val_box_loss', 'val_box']),
+        'cls': _get_column(df, ['val_cls_loss', 'val_cls']),
+        'dfl': _get_column(df, ['val_dfl_loss', 'val_dfl']),
+    }
+
+    # 计算 total_loss（如果不存在）
+    train_total = _get_column(df, ['train_loss', 'train_total_loss'])
+    if train_total is None and all(v is not None for v in train_cols.values()):
+        df['train_total_loss'] = df[train_cols['box']] + df[train_cols['cls']] + df[train_cols['dfl']]
+        train_total = 'train_total_loss'
+
+    val_total = _get_column(df, ['val_loss', 'val_total_loss'])
+    if val_total is None and all(v is not None for v in val_cols.values()):
+        df['val_total_loss'] = df[val_cols['box']] + df[val_cols['cls']] + df[val_cols['dfl']]
+        val_total = 'val_total_loss'
+
+    # 创建 2x4 子图
+    fig, axes = plt.subplots(2, 4, figsize=(18, 8))
+
+    # 标题映射
+    titles = {
+        'box': 'Box Loss',
+        'cls': 'Cls Loss',
+        'dfl': 'DFL Loss',
+        'total': 'Total Loss'
+    }
+
+    # 第一行：Train losses
+    for idx, (key, title) in enumerate(titles.items()):
+        ax = axes[0, idx]
+        if key == 'total':
+            col = train_total
+        else:
+            col = train_cols[key]
+
+        if col is not None:
+            ax.plot(df['epoch'], df[col], color=COLORS[idx], linewidth=2, marker='o', markersize=3)
+            ax.set_title(f'Train {title}')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, f'{title}\nNot Available',
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=10, color='gray')
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    # 第二行：Val losses
+    for idx, (key, title) in enumerate(titles.items()):
+        ax = axes[1, idx]
+        if key == 'total':
+            col = val_total
+        else:
+            col = val_cols[key]
+
+        if col is not None:
+            ax.plot(df['epoch'], df[col], color=COLORS[idx + 2], linewidth=2, marker='s', markersize=3)
+            ax.set_title(f'Val {title}')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.text(0.5, 0.5, f'{title}\nNot Available',
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=10, color='gray')
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    plt.suptitle('Loss Analysis', fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+
+    save_path = save_dir / 'loss_analysis.png'
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Loss analysis saved to: {save_path}")
+    plt.close()
+
+
+def plot_map_performance(csv_path: Path, save_dir: Path):
+    """绘制 mAP 性能图 (1x2 布局)
+
+    左图：mAP@0.5
+    右图：mAP@0.5:0.95
+
+    Args:
+        csv_path: CSV 文件路径
+        save_dir: 保存目录
+    """
+    df = _load_and_clean_csv(csv_path)
+
+    # 查找 mAP 列
+    map50_col = _get_column(df, ['val_map50', 'map50', 'mAP50', 'metrics/mAP50(B)'])
+    map50_95_col = _get_column(df, ['val_map50_95', 'map50_95', 'mAP50-95', 'metrics/mAP50-95(B)'])
+
+    # 检查是否有 mAP 数据
+    if map50_col is None and map50_95_col is None:
+        warnings.warn("No mAP columns found in CSV. Skipping mAP performance plot.")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # 左图：mAP@0.5
+    if map50_col is not None:
+        axes[0].plot(df['epoch'], df[map50_col] * 100,
+                    color=COLORS[0], linewidth=2, marker='o', markersize=4)
+        axes[0].set_xlabel('Epoch')
+        axes[0].set_ylabel('mAP@0.5 (%)')
+        axes[0].set_title('Validation mAP@0.5')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_ylim([0, 105])
+    else:
+        axes[0].text(0.5, 0.5, 'mAP@0.5\nNot Available',
+                    ha='center', va='center', transform=axes[0].transAxes,
+                    fontsize=12, color='gray')
+        axes[0].set_xticks([])
+        axes[0].set_yticks([])
+        axes[0].set_title('Validation mAP@0.5')
+
+    # 右图：mAP@0.5:0.95
+    if map50_95_col is not None:
+        axes[1].plot(df['epoch'], df[map50_95_col] * 100,
+                    color=COLORS[1], linewidth=2, marker='s', markersize=4)
+        axes[1].set_xlabel('Epoch')
+        axes[1].set_ylabel('mAP@0.5:0.95 (%)')
+        axes[1].set_title('Validation mAP@0.5:0.95')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_ylim([0, 105])
+    else:
+        axes[1].text(0.5, 0.5, 'mAP@0.5:0.95\nNot Available',
+                    ha='center', va='center', transform=axes[1].transAxes,
+                    fontsize=12, color='gray')
+        axes[1].set_xticks([])
+        axes[1].set_yticks([])
+        axes[1].set_title('Validation mAP@0.5:0.95')
+
+    plt.suptitle('mAP Performance', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+    save_path = save_dir / 'map_performance.png'
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"mAP performance saved to: {save_path}")
+    plt.close()
+
+
+def plot_training_status(csv_path: Path, save_dir: Path):
+    """绘制训练状态图 (1x2 布局)
+
+    左图：训练时间
+    右图：学习率
+
+    Args:
+        csv_path: CSV 文件路径
+        save_dir: 保存目录
+    """
+    df = _load_and_clean_csv(csv_path)
+
+    # 查找列
+    time_col = _get_column(df, ['time', 'epoch_time', 'training_time'])
+    lr_col = _get_column(df, ['lr', 'learning_rate', 'lr/pg0'])
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # 左图：训练时间
+    if time_col is not None:
+        axes[0].plot(df['epoch'], df[time_col],
+                    color=COLORS[4], linewidth=2, marker='o', markersize=4)
+        axes[0].set_xlabel('Epoch')
+        axes[0].set_ylabel('Time (seconds)')
+        axes[0].set_title('Epoch Training Time')
+        axes[0].grid(True, alpha=0.3)
+
+        # 添加平均时间线
+        avg_time = df[time_col].mean()
+        axes[0].axhline(y=avg_time, color=COLORS[5], linestyle='--',
+                       linewidth=1.5, alpha=0.7, label=f'Avg: {avg_time:.1f}s')
+        axes[0].legend()
+    else:
+        axes[0].text(0.5, 0.5, 'Time Data\nNot Available',
+                    ha='center', va='center', transform=axes[0].transAxes,
+                    fontsize=12, color='gray')
+        axes[0].set_xticks([])
+        axes[0].set_yticks([])
+        axes[0].set_title('Epoch Training Time')
+
+    # 右图：学习率
+    if lr_col is not None:
+        axes[1].plot(df['epoch'], df[lr_col],
+                    color=COLORS[6], linewidth=2, marker='s', markersize=4)
+        axes[1].set_xlabel('Epoch')
+        axes[1].set_ylabel('Learning Rate')
+        axes[1].set_title('Learning Rate Schedule')
+        axes[1].set_yscale('log')
+        axes[1].grid(True, alpha=0.3)
+    else:
+        axes[1].text(0.5, 0.5, 'Learning Rate\nNot Available',
+                    ha='center', va='center', transform=axes[1].transAxes,
+                    fontsize=12, color='gray')
+        axes[1].set_xticks([])
+        axes[1].set_yticks([])
+        axes[1].set_title('Learning Rate Schedule')
+
+    plt.suptitle('Training Status', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+    save_path = save_dir / 'training_status.png'
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Training status saved to: {save_path}")
+    plt.close()
 
 
 def plot_training_curves(csv_path: Path, save_dir: Path):
-    """绘制训练曲线
+    """绘制所有训练曲线（主入口函数）
+
+    生成三张独立的 PNG 图片：
+    - loss_analysis.png: Loss 曲线分析
+    - map_performance.png: mAP 性能
+    - training_status.png: 训练状态
 
     Args:
         csv_path: CSV 文件路径
         save_dir: 保存图片的目录
     """
-    # 读取 CSV 数据
-    epochs = []
-    train_loss = []
-    val_loss = []
-    train_metric = []  # 可以是 accuracy 或 mAP
-    val_metric = []
-    val_map50 = []  # mAP50 指标
-    val_map50_95 = []  # mAP50-95 指标
-    lr = []
-    epoch_time = []
-    metric_name = ''  # 'accuracy' 或 'detection'
+    csv_path = Path(csv_path)
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(csv_path, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            epochs.append(int(row['epoch']))
-            train_loss.append(float(row['train_loss']))
-            val_loss.append(float(row['val_loss']))
-            lr.append(float(row['lr']))
-            epoch_time.append(float(row['time']))
+    print(f"\nGenerating training curves from: {csv_path}")
 
-            # 检查是哪种指标
-            if not metric_name:
-                if 'train_accuracy' in row:
-                    metric_name = 'accuracy'
-                elif 'val_map50' in row:
-                    metric_name = 'detection'
+    # 绘制三张图
+    plot_loss_analysis(csv_path, save_dir)
+    plot_map_performance(csv_path, save_dir)
+    plot_training_status(csv_path, save_dir)
 
-            # 读取指标值
-            if metric_name == 'accuracy':
-                if row.get('train_accuracy'):
-                    train_metric.append(float(row['train_accuracy']))
-                if row.get('val_accuracy'):
-                    val_metric.append(float(row['val_accuracy']))
-            elif metric_name == 'detection':
-                # 检测任务：读取 mAP50 和 mAP50-95
-                if row.get('val_map50'):
-                    val = row['val_map50']
-                    if val:
-                        val_map50.append(float(val))
-                if row.get('val_map50_95'):
-                    val = row['val_map50_95']
-                    if val:
-                        val_map50_95.append(float(val))
-
-    epochs = np.array(epochs)
-
-    # 根据任务类型决定图表布局
-    if metric_name == 'detection':
-        # 检测任务：使用 2x3 布局，包含 mAP50 和 mAP50-95
-        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    else:
-        # 分类任务或通用任务：使用 2x2 布局
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-
-    # 1. Loss 曲线
-    ax1 = axes[0, 0]
-    ax1.plot(epochs, train_loss, 'b-', label='Train Loss', linewidth=2)
-    ax1.plot(epochs, val_loss, 'r-', label='Val Loss', linewidth=2)
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Loss')
-    ax1.set_title('Training and Validation Loss')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # 2. 指标曲线
-    if metric_name == 'accuracy':
-        ax2 = axes[0, 1]
-        if train_metric or val_metric:
-            if train_metric:
-                ax2.plot(epochs[:len(train_metric)], np.array(train_metric) * 100,
-                        'b-', label='Train Acc', linewidth=2)
-            if val_metric:
-                ax2.plot(epochs[:len(val_metric)], np.array(val_metric) * 100,
-                        'r-', label='Val Acc', linewidth=2)
-            ax2.set_xlabel('Epoch')
-            ax2.set_ylabel('Accuracy (%)')
-            ax2.set_title('Training and Validation Accuracy')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
-        else:
-            ax2.text(0.5, 0.5, 'No accuracy data available\n(Metric not computed during training)',
-                    ha='center', va='center', transform=ax2.transAxes,
-                    fontsize=12, color='gray')
-            ax2.set_title('Training and Validation Accuracy')
-            ax2.set_xticks([])
-            ax2.set_yticks([])
-    elif metric_name == 'detection':
-        # 检测任务：分别绘制 mAP50 和 mAP50-95
-        ax2 = axes[0, 1]
-        if val_map50:
-            ax2.plot(epochs[:len(val_map50)], np.array(val_map50) * 100,
-                    'r-', label='Val mAP50', linewidth=2)
-        ax2.set_xlabel('Epoch')
-        ax2.set_ylabel('mAP50 (%)')
-        ax2.set_title('Validation mAP@0.5')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-
-        ax5 = axes[0, 2]
-        if val_map50_95:
-            ax5.plot(epochs[:len(val_map50_95)], np.array(val_map50_95) * 100,
-                     'r-', label='Val mAP50-95', linewidth=2)
-        ax5.set_xlabel('Epoch')
-        ax5.set_ylabel('mAP50-95 (%)')
-        ax5.set_title('Validation mAP@0.5:0.95')
-        ax5.legend()
-        ax5.grid(True, alpha=0.3)
-
-        # 同时显示 mAP50 和 mAP50-95 的对比图
-        ax6 = axes[1, 2]
-        if val_map50:
-            ax6.plot(epochs[:len(val_map50)], np.array(val_map50) * 100,
-                    'b-', label='mAP@0.5', linewidth=2)
-        if val_map50_95:
-            ax6.plot(epochs[:len(val_map50_95)], np.array(val_map50_95) * 100,
-                    'r-', label='mAP@0.5:0.95', linewidth=2)
-        ax6.set_xlabel('Epoch')
-        ax6.set_ylabel('mAP (%)')
-        ax6.set_title('mAP@0.5 vs mAP@0.5:0.95')
-        ax6.legend()
-        ax6.grid(True, alpha=0.3)
-    else:
-        # 通用任务
-        ax2 = axes[0, 1]
-        ax2.text(0.5, 0.5, 'No metric data available',
-                ha='center', va='center', transform=ax2.transAxes,
-                fontsize=12, color='gray')
-        ax2.set_title('Training and Validation Metric')
-        ax2.set_xticks([])
-        ax2.set_yticks([])
-
-    # 3. Learning Rate 曲线
-    ax3 = axes[1, 0]
-    ax3.plot(epochs, lr, 'g-', linewidth=2)
-    ax3.set_xlabel('Epoch')
-    ax3.set_ylabel('Learning Rate')
-    ax3.set_title('Learning Rate Schedule')
-    ax3.set_yscale('log')
-    ax3.grid(True, alpha=0.3)
-
-    # 4. Epoch Time 曲线
-    ax4 = axes[1, 1]
-    ax4.plot(epochs, epoch_time, 'm-', linewidth=2)
-    ax4.set_xlabel('Epoch')
-    ax4.set_ylabel('Time (seconds)')
-    ax4.set_title('Epoch Training Time')
-    ax4.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(save_dir / 'training_curves.png', dpi=150, bbox_inches='tight')
-    print(f"训练曲线已保存到: {save_dir / 'training_curves.png'}")
-    plt.close()
+    print(f"\nAll curves saved to: {save_dir}")
