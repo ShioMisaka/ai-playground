@@ -111,11 +111,12 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
             col = train_cols[key]
 
         if col is not None:
-            ax.plot(df['epoch'], df[col], color=COLORS[idx], linewidth=2, marker='o', markersize=3)
+            ax.plot(df['epoch'], df[col], color=COLORS[idx], linewidth=2, marker='o', markersize=3, label='Loss')
             ax.set_title(f'Train {title}')
             ax.set_xlabel('Epoch')
             ax.set_ylabel('Loss')
             ax.grid(True, alpha=0.3)
+            ax.legend(loc='best')
         else:
             ax.text(0.5, 0.5, f'{title}\nNot Available',
                    ha='center', va='center', transform=ax.transAxes,
@@ -132,11 +133,12 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
             col = val_cols[key]
 
         if col is not None:
-            ax.plot(df['epoch'], df[col], color=COLORS[idx + 2], linewidth=2, marker='s', markersize=3)
+            ax.plot(df['epoch'], df[col], color=COLORS[idx + 2], linewidth=2, marker='s', markersize=3, label='Loss')
             ax.set_title(f'Val {title}')
             ax.set_xlabel('Epoch')
             ax.set_ylabel('Loss')
             ax.grid(True, alpha=0.3)
+            ax.legend(loc='best')
         else:
             ax.text(0.5, 0.5, f'{title}\nNot Available',
                    ha='center', va='center', transform=ax.transAxes,
@@ -179,12 +181,13 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
     # 左图：mAP@0.5
     if map50_col is not None:
         axes[0].plot(df['epoch'], df[map50_col] * 100,
-                    color=COLORS[0], linewidth=2, marker='o', markersize=4)
+                    color=COLORS[0], linewidth=2, marker='o', markersize=4, label='mAP@0.5')
         axes[0].set_xlabel('Epoch')
         axes[0].set_ylabel('mAP@0.5 (%)')
         axes[0].set_title('Validation mAP@0.5')
         axes[0].grid(True, alpha=0.3)
         axes[0].set_ylim([0, 105])
+        axes[0].legend(loc='best')
     else:
         axes[0].text(0.5, 0.5, 'mAP@0.5\nNot Available',
                     ha='center', va='center', transform=axes[0].transAxes,
@@ -196,12 +199,13 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
     # 右图：mAP@0.5:0.95
     if map50_95_col is not None:
         axes[1].plot(df['epoch'], df[map50_95_col] * 100,
-                    color=COLORS[1], linewidth=2, marker='s', markersize=4)
+                    color=COLORS[1], linewidth=2, marker='s', markersize=4, label='mAP@0.5:0.95')
         axes[1].set_xlabel('Epoch')
         axes[1].set_ylabel('mAP@0.5:0.95 (%)')
         axes[1].set_title('Validation mAP@0.5:0.95')
         axes[1].grid(True, alpha=0.3)
         axes[1].set_ylim([0, 105])
+        axes[1].legend(loc='best')
     else:
         axes[1].text(0.5, 0.5, 'mAP@0.5:0.95\nNot Available',
                     ha='center', va='center', transform=axes[1].transAxes,
@@ -240,7 +244,7 @@ def plot_training_status(csv_path: Path, save_dir: Path):
     # 左图：训练时间
     if time_col is not None:
         axes[0].plot(df['epoch'], df[time_col],
-                    color=COLORS[4], linewidth=2, marker='o', markersize=4)
+                    color=COLORS[4], linewidth=2, marker='o', markersize=4, label='Epoch Time')
         axes[0].set_xlabel('Epoch')
         axes[0].set_ylabel('Time (seconds)')
         axes[0].set_title('Epoch Training Time')
@@ -250,7 +254,7 @@ def plot_training_status(csv_path: Path, save_dir: Path):
         avg_time = df[time_col].mean()
         axes[0].axhline(y=avg_time, color=COLORS[5], linestyle='--',
                        linewidth=1.5, alpha=0.7, label=f'Avg: {avg_time:.1f}s')
-        axes[0].legend()
+        axes[0].legend(loc='best')
     else:
         axes[0].text(0.5, 0.5, 'Time Data\nNot Available',
                     ha='center', va='center', transform=axes[0].transAxes,
@@ -262,12 +266,13 @@ def plot_training_status(csv_path: Path, save_dir: Path):
     # 右图：学习率
     if lr_col is not None:
         axes[1].plot(df['epoch'], df[lr_col],
-                    color=COLORS[6], linewidth=2, marker='s', markersize=4)
+                    color=COLORS[6], linewidth=2, marker='s', markersize=4, label='Learning Rate')
         axes[1].set_xlabel('Epoch')
         axes[1].set_ylabel('Learning Rate')
         axes[1].set_title('Learning Rate Schedule')
         axes[1].set_yscale('log')
         axes[1].grid(True, alpha=0.3)
+        axes[1].legend(loc='best')
     else:
         axes[1].text(0.5, 0.5, 'Learning Rate\nNot Available',
                     ha='center', va='center', transform=axes[1].transAxes,
