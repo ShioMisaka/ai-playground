@@ -223,6 +223,74 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
     plt.close()
 
 
+def plot_precision_recall(csv_path: Path, save_dir: Path):
+    """绘制 Precision 和 Recall 曲线图 (1x2 布局)
+
+    左图：Precision
+    右图：Recall
+
+    Args:
+        csv_path: CSV 文件路径
+        save_dir: 保存目录
+    """
+    df = _load_and_clean_csv(csv_path)
+
+    # 查找 precision 和 recall 列（支持新旧格式）
+    precision_col = _get_column(df, ['metrics/precision(B)', 'val_precision', 'precision'])
+    recall_col = _get_column(df, ['metrics/recall(B)', 'val_recall', 'recall'])
+
+    # 检查是否有数据
+    if precision_col is None and recall_col is None:
+        warnings.warn("No precision/recall columns found in CSV. Skipping precision-recall plot.")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # 左图：Precision
+    if precision_col is not None:
+        axes[0].plot(df['epoch'], df[precision_col] * 100,
+                    color=COLORS[2], linewidth=2, marker='o', markersize=4, label='Precision')
+        axes[0].set_xlabel('Epoch')
+        axes[0].set_ylabel('Precision (%)')
+        axes[0].set_title('Validation Precision')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_ylim([0, 105])
+        axes[0].legend(loc='best')
+    else:
+        axes[0].text(0.5, 0.5, 'Precision\nNot Available',
+                    ha='center', va='center', transform=axes[0].transAxes,
+                    fontsize=12, color='gray')
+        axes[0].set_xticks([])
+        axes[0].set_yticks([])
+        axes[0].set_title('Validation Precision')
+
+    # 右图：Recall
+    if recall_col is not None:
+        axes[1].plot(df['epoch'], df[recall_col] * 100,
+                    color=COLORS[3], linewidth=2, marker='s', markersize=4, label='Recall')
+        axes[1].set_xlabel('Epoch')
+        axes[1].set_ylabel('Recall (%)')
+        axes[1].set_title('Validation Recall')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_ylim([0, 105])
+        axes[1].legend(loc='best')
+    else:
+        axes[1].text(0.5, 0.5, 'Recall\nNot Available',
+                    ha='center', va='center', transform=axes[1].transAxes,
+                    fontsize=12, color='gray')
+        axes[1].set_xticks([])
+        axes[1].set_yticks([])
+        axes[1].set_title('Validation Recall')
+
+    plt.suptitle('Precision & Recall', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+    save_path = save_dir / 'precision_recall.png'
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Precision & Recall saved to: {save_path}")
+    plt.close()
+
+
 def plot_training_status(csv_path: Path, save_dir: Path):
     """绘制训练状态图 (1x2 布局)
 
@@ -293,9 +361,10 @@ def plot_training_status(csv_path: Path, save_dir: Path):
 def plot_training_curves(csv_path: Path, save_dir: Path):
     """绘制所有训练曲线（主入口函数）
 
-    生成三张独立的 PNG 图片：
+    生成四张独立的 PNG 图片：
     - loss_analysis.png: Loss 曲线分析
     - map_performance.png: mAP 性能
+    - precision_recall.png: Precision 和 Recall
     - training_status.png: 训练状态
 
     Args:
@@ -308,9 +377,10 @@ def plot_training_curves(csv_path: Path, save_dir: Path):
 
     print(f"\nGenerating training curves from: {csv_path}")
 
-    # 绘制三张图
+    # 绘制四张图
     plot_loss_analysis(csv_path, save_dir)
     plot_map_performance(csv_path, save_dir)
+    plot_precision_recall(csv_path, save_dir)
     plot_training_status(csv_path, save_dir)
 
     print(f"\nAll curves saved to: {save_dir}")
