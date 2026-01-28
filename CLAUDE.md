@@ -31,15 +31,21 @@ models/     # 完整模型（从 modules 导入并组合）
 engine/     # 训练引擎核心
 ├── train.py         # train() 主训练流程
 ├── training.py      # train_one_epoch() 核心训练逻辑
-├── validate.py      # validate() 验证与 mAP50
-└── detector.py      # 检测器专用训练逻辑
+├── validate.py      # validate() 验证与 mAP
+├── detector.py      # 检测器专用训练逻辑
+└── ema.py           # ModelEMA 指数移动平均
 
 utils/      # 工具模块
 ├── load.py          # create_dataloaders()
-├── logger.py        # TrainingLogger (CSV logging)
+├── logger.py        # TrainingLogger, LiveTableLogger
 ├── metrics.py       # compute_map50()
 ├── curves.py        # plot_training_curves()
+├── path_helper.py   # get_save_dir() 自动递增目录
+├── transforms.py    # MosaicTransform, MixupTransform
 └── model_summary.py # print_model_summary()
+
+scripts/    # 脚本
+└── plot_curves.py   # 训练曲线绘制脚本
 ```
 
 ### Import Convention
@@ -71,41 +77,55 @@ train(
     img_size=640,
     lr=0.001,
     device='cuda',
-    save_dir='runs/train'
+    save_dir='runs/train',
+    use_ema=True,          # 使用 EMA（推荐）
+    use_mosaic=True,       # 使用 Mosaic 增强
+    close_mosaic=10,       # 最后 10 个 epoch 关闭 Mosaic
 )
 ```
 
-### Using Conv Wrapper
+### Auto-Increment Save Directory
+
+`save_dir` 会自动递增避免覆盖：
+- `runs/train/exp` → `runs/train/exp_1` → `runs/train/exp_2` ...
 
 ```python
-from models import Conv
+from utils import get_save_dir
 
-self.cv1 = Conv(c1, c2, k=1, s=1, p=0)  # Conv+BN+SiLU
-self.cv2 = Conv(c1, c2, k=3, s=1, p=1)  # 3x3 same padding
-```
-
-### Using BiFPN
-
-```python
-from models import BiFPN_Cat
-
-bifpn = BiFPN_Cat(c1=[128, 256, 512])
-out = bifpn([feat1, feat2, feat3])  # 输入通道可不同
+save_dir = get_save_dir('runs/train/exp')  # 自动处理冲突
 ```
 
 ### Custom Training Loop
 
 ```python
 from engine import train_one_epoch, validate
-from utils import TrainingLogger, plot_training_curves
+from utils import TrainingLogger, LiveTableLogger, plot_training_curves
 
-with TrainingLogger('runs/training.csv', is_detection=True) as logger:
+# CSV 日志（YOLO 风格表头：train/loss, metrics/mAP50(B) 等）
+with TrainingLogger('runs/training_log.csv', is_detection=True) as csv_logger:
+    # Live 表格（动态刷新训练进度）
+    live_logger = LiveTableLogger(
+        columns=["total_loss", "box_loss", "cls_loss", "dfl_loss"],
+        total_epochs=100,
+        console_width=130,
+    )
+
     for epoch in range(epochs):
+        live_logger.start_epoch(epoch + 1, lr)
+
         train_metrics = train_one_epoch(model, train_loader, optimizer, device, epoch+1, nc=2)
         val_metrics = validate(model, val_loader, device, nc=2, img_size=640)
-        logger.write_epoch(epoch+1, epoch_time, lr, train_metrics, val_metrics)
 
-plot_training_curves('runs/training.csv', save_dir='runs')
+        live_logger.update_row("train", train_metrics)
+        live_logger.update_row("val", val_metrics)
+        live_logger.end_epoch(epoch_time)
+
+        csv_logger.write_epoch(epoch + 1, epoch_time, lr, train_metrics, val_metrics)
+
+    live_logger.stop()
+
+# 绘制训练曲线（生成 4 张独立 PNG）
+plot_training_curves('runs/training_log.csv', save_dir='runs')
 ```
 
 ## Core Training Config
@@ -123,10 +143,46 @@ plot_training_curves('runs/training.csv', save_dir='runs')
 
 ### Learning Rate Scheduler
 
-**CosineAnnealingWarmRestarts** 帮助模型跳出局部最优：
-- `T_0=10`: 第一次重启周期
-- `T_mult=2`: 周期长度倍增
+**CosineAnnealingLR** 平滑下降，无中途跳变：
+- `T_max=epochs`: 余弦退火周期长度
 - `eta_min=1e-6`: 最小学习率
+
+### EMA (Exponential Moving Average)
+
+EMA 通过维护历史权重的指数移动平均，获得更稳定的模型：
+- `decay=0.9999`: 衰减系数
+- 动态调整公式：`decay = initial_decay * (1 - exp(-updates / 2000))`
+- 验证时使用 EMA 模型可获得更平滑的 mAP 曲线
+
+```python
+from engine.ema import ModelEMA
+
+ema = ModelEMA(model, decay=0.9999)
+for batch in dataloader:
+    loss = model(imgs, targets)
+    loss.backward()
+    optimizer.step()
+    ema.update(model)  # 更新 EMA
+
+# 验证时使用 EMA 模型
+val_metrics = validate(ema.ema, val_loader, ...)
+```
+
+### Mosaic Data Augmentation
+
+Mosaic 将 4 张图片拼接成一张大图，是 YOLOv4/v5/v8/v11 的核心增强：
+- 提升小目标检测能力
+- 训练后期建议关闭（默认最后 10 个 epoch）
+
+```python
+from utils.transforms import MosaicTransform
+
+mosaic = MosaicTransform(dataset, img_size=640, prob=1.0)
+img, boxes = mosaic(img, boxes)
+
+# 训练后期关闭
+mosaic.enable = False
+```
 
 ### TaskAlignedAssigner (TAL) 关键参数
 
@@ -144,6 +200,27 @@ plot_training_curves('runs/training.csv', save_dir='runs')
 - `beta=6.0`（官方）：严格，只有 IoU 高的框才能获得高分
 - 低质量匹配会导致 Box Loss 难以收敛，mAP50 停滞在 50-70%
 
+### CSV 日志格式
+
+CSV 表头采用 YOLO 风格的斜杠层级格式：
+
+```
+epoch,time,lr,train/loss,val/loss,train/box_loss,train/cls_loss,train/dfl_loss,val/box_loss,val/cls_loss,val/dfl_loss,metrics/precision(B),metrics/recall(B),metrics/mAP50(B),metrics/mAP50-95(B)
+```
+
+### 训练曲线输出
+
+`plot_training_curves()` 生成 4 张独立的 PNG 图片：
+
+| 文件名 | 内容 |
+|--------|------|
+| `loss_analysis.png` | Loss 曲线（2x4 布局：Train/Val × box/cls/dfl/total） |
+| `map_performance.png` | mAP@0.5 和 mAP@0.5:0.95 |
+| `precision_recall.png` | Precision 和 Recall |
+| `training_status.png` | 训练时间和学习率 |
+
+所有曲线都带有黄色点状虚线平滑曲线（Savitzky-Golay 滤波）。
+
 ### Detection Head Mode Handling
 
 检测头在不同模式下返回不同格式：
@@ -153,9 +230,9 @@ plot_training_curves('runs/training.csv', save_dir='runs')
 
 验证时临时切换模式：
 ```python
-model.detect.eval()  # 推理模式获取预测
+model.detect.train()  # 训练模式用于计算 loss
 # ... run validation ...
-model.detect.train()  # 恢复训练模式
+model.detect.eval()   # 恢复推理模式
 ```
 
 ## Development Guidelines

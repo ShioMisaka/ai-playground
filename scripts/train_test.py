@@ -17,6 +17,9 @@ trained_model = train(
     batch_size=8,
     img_size=640,
     lr=0.001,  # 修复：从0.01降低到0.001，避免warmup期间学习率过高
+    use_ema=True,          # 使用 EMA（推荐）
+    use_mosaic=True,       # 使用 Mosaic 增强
+    close_mosaic=10,       # 最后 10 个 epoch 关闭 Mosaic
     device='cuda',
-    save_dir='outputs/train/exp1'
+    save_dir='outputs/train/exp'
 )
