@@ -12,9 +12,9 @@ from rich.console import Console
 
 from .training import train_one_epoch, print_metrics
 from .validate import validate
-from .ema import ModelEMA
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
-                   print_training_info, print_model_summary, print_detection_header, get_save_dir)
+                   print_training_info, print_model_summary, print_detection_header, get_save_dir,
+                   ModelEMA)
 from utils.transforms import MosaicTransform
 
 

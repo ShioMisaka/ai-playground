@@ -32,8 +32,7 @@ engine/     # 训练引擎核心
 ├── train.py         # train() 主训练流程
 ├── training.py      # train_one_epoch() 核心训练逻辑
 ├── validate.py      # validate() 验证与 mAP
-├── detector.py      # 检测器专用训练逻辑
-└── ema.py           # ModelEMA 指数移动平均
+└── detector.py      # 检测器专用训练逻辑
 
 utils/      # 工具模块
 ├── load.py          # create_dataloaders()
@@ -42,6 +41,7 @@ utils/      # 工具模块
 ├── curves.py        # plot_training_curves()
 ├── path_helper.py   # get_save_dir() 自动递增目录
 ├── transforms.py    # MosaicTransform, MixupTransform
+├── ema.py           # ModelEMA 指数移动平均
 └── model_summary.py # print_model_summary()
 
 scripts/    # 脚本
@@ -155,7 +155,7 @@ EMA 通过维护历史权重的指数移动平均，获得更稳定的模型：
 - 验证时使用 EMA 模型可获得更平滑的 mAP 曲线
 
 ```python
-from engine.ema import ModelEMA
+from utils import ModelEMA
 
 ema = ModelEMA(model, decay=0.9999)
 for batch in dataloader:

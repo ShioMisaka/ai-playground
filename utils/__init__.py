@@ -30,6 +30,9 @@ from .table import (
     format_detection_val_line,
 )
 
+# EMA
+from .ema import ModelEMA
+
 # 模型和训练信息输出
 from .model_summary import (
     print_training_info,
@@ -70,6 +73,9 @@ __all__ = [
     'print_detection_header',
     'format_detection_train_line',
     'format_detection_val_line',
+
+    # EMA
+    'ModelEMA',
 
     # 模型和训练信息
     'print_training_info',
