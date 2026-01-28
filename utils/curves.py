@@ -6,21 +6,60 @@
 import warnings
 from pathlib import Path
 
+import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from scipy.signal import savgol_filter
 
 
 # 设置样式
 sns.set_style("whitegrid")
-plt.rcParams['font.size'] = 10
-plt.rcParams['axes.labelsize'] = 11
-plt.rcParams['axes.titlesize'] = 12
-plt.rcParams['legend.fontsize'] = 9
+plt.rcParams['font.size'] = 14
+plt.rcParams['axes.labelsize'] = 15
+plt.rcParams['axes.titlesize'] = 16
+plt.rcParams['legend.fontsize'] = 13
 plt.rcParams['figure.dpi'] = 100
 
 # 颜色方案（从 seaborn 调色板）
 COLORS = sns.color_palette("husl", 8)
+# 黄色用于平滑散点
+SMOOTH_COLOR = '#FFC107'  # 琥珀色/金黄
+# 将原黄色（COLORS[3]）替换为深青色
+COLORS = list(COLORS)
+COLORS[3] = '#008B8B'  # Dark Cyan
+
+
+def _smooth_data(data: np.ndarray, window_length: int = 5, polyorder: int = 2) -> np.ndarray:
+    """使用 Savitzky-Golay 滤波器平滑数据
+
+    Args:
+        data: 输入数据数组
+        window_length: 窗口大小（必须为奇数且大于 polyorder）
+        polyorder: 多项式阶数
+
+    Returns:
+        平滑后的数据
+    """
+    data = np.asarray(data)
+    n = len(data)
+
+    # 确保窗口大小不超过数据长度且为奇数
+    if window_length >= n:
+        window_length = n - 1 if (n - 1) % 2 == 1 else n - 2
+    if window_length <= polyorder:
+        window_length = polyorder + 1 if (polyorder + 1) % 2 == 1 else polyorder + 2
+    if window_length < 3:
+        window_length = 3
+
+    # 如果窗口大小调整后仍不满足条件，直接返回原数据
+    if window_length >= n or window_length <= polyorder:
+        return data
+
+    try:
+        return savgol_filter(data, window_length, polyorder)
+    except Exception:
+        return data
 
 
 def _load_and_clean_csv(csv_path: Path) -> pd.DataFrame:
@@ -111,7 +150,10 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
             col = train_cols[key]
 
         if col is not None:
-            ax.plot(df['epoch'], df[col], color=COLORS[idx], linewidth=2, marker='o', markersize=3, label='Loss')
+            ax.plot(df['epoch'], df[col], color=COLORS[idx], linewidth=3, marker='o', markersize=6, label='Train')
+            # 添加平滑虚线（黄色）
+            smoothed = _smooth_data(df[col].values)
+            ax.plot(df['epoch'], smoothed, color=SMOOTH_COLOR, linestyle=':', linewidth=3, alpha=0.8)
             ax.set_title(f'Train {title}')
             ax.set_xlabel('Epoch')
             ax.set_ylabel('Loss')
@@ -120,7 +162,7 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
         else:
             ax.text(0.5, 0.5, f'{title}\nNot Available',
                    ha='center', va='center', transform=ax.transAxes,
-                   fontsize=10, color='gray')
+                   fontsize=12, color='gray')
             ax.set_xticks([])
             ax.set_yticks([])
 
@@ -133,7 +175,10 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
             col = val_cols[key]
 
         if col is not None:
-            ax.plot(df['epoch'], df[col], color=COLORS[idx + 2], linewidth=2, marker='s', markersize=3, label='Loss')
+            ax.plot(df['epoch'], df[col], color=COLORS[idx], linewidth=3, marker='s', markersize=6, label='Val')
+            # 添加平滑虚线（黄色）
+            smoothed = _smooth_data(df[col].values)
+            ax.plot(df['epoch'], smoothed, color=SMOOTH_COLOR, linestyle=':', linewidth=3, alpha=0.8)
             ax.set_title(f'Val {title}')
             ax.set_xlabel('Epoch')
             ax.set_ylabel('Loss')
@@ -142,16 +187,15 @@ def plot_loss_analysis(csv_path: Path, save_dir: Path):
         else:
             ax.text(0.5, 0.5, f'{title}\nNot Available',
                    ha='center', va='center', transform=ax.transAxes,
-                   fontsize=10, color='gray')
+                   fontsize=12, color='gray')
             ax.set_xticks([])
             ax.set_yticks([])
 
-    plt.suptitle('Loss Analysis', fontsize=16, fontweight='bold', y=0.995)
+    plt.suptitle('Loss Analysis', fontsize=18, fontweight='bold', y=0.995)
     plt.tight_layout()
 
     save_path = save_dir / 'loss_analysis.png'
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"Loss analysis saved to: {save_path}")
     plt.close()
 
 
@@ -181,7 +225,10 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
     # 左图：mAP@0.5
     if map50_col is not None:
         axes[0].plot(df['epoch'], df[map50_col] * 100,
-                    color=COLORS[0], linewidth=2, marker='o', markersize=4, label='mAP@0.5')
+                    color=COLORS[0], linewidth=3, marker='o', markersize=6, label='mAP@0.5')
+        # 添加平滑虚线（黄色）
+        smoothed = _smooth_data(df[map50_col].values * 100)
+        axes[0].plot(df['epoch'], smoothed, color=SMOOTH_COLOR, linestyle=':', linewidth=3, alpha=0.8)
         axes[0].set_xlabel('Epoch')
         axes[0].set_ylabel('mAP@0.5 (%)')
         axes[0].set_title('Validation mAP@0.5')
@@ -199,7 +246,10 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
     # 右图：mAP@0.5:0.95
     if map50_95_col is not None:
         axes[1].plot(df['epoch'], df[map50_95_col] * 100,
-                    color=COLORS[1], linewidth=2, marker='s', markersize=4, label='mAP@0.5:0.95')
+                    color=COLORS[1], linewidth=3, marker='s', markersize=6, label='mAP@0.5:0.95')
+        # 添加平滑虚线（黄色）
+        smoothed = _smooth_data(df[map50_95_col].values * 100)
+        axes[1].plot(df['epoch'], smoothed, color=SMOOTH_COLOR, linestyle=':', linewidth=3, alpha=0.8)
         axes[1].set_xlabel('Epoch')
         axes[1].set_ylabel('mAP@0.5:0.95 (%)')
         axes[1].set_title('Validation mAP@0.5:0.95')
@@ -214,12 +264,11 @@ def plot_map_performance(csv_path: Path, save_dir: Path):
         axes[1].set_yticks([])
         axes[1].set_title('Validation mAP@0.5:0.95')
 
-    plt.suptitle('mAP Performance', fontsize=16, fontweight='bold')
+    plt.suptitle('mAP Performance', fontsize=18, fontweight='bold')
     plt.tight_layout()
 
     save_path = save_dir / 'map_performance.png'
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"mAP performance saved to: {save_path}")
     plt.close()
 
 
@@ -249,7 +298,10 @@ def plot_precision_recall(csv_path: Path, save_dir: Path):
     # 左图：Precision
     if precision_col is not None:
         axes[0].plot(df['epoch'], df[precision_col] * 100,
-                    color=COLORS[2], linewidth=2, marker='o', markersize=4, label='Precision')
+                    color=COLORS[2], linewidth=3, marker='o', markersize=6, label='Precision')
+        # 添加平滑虚线（黄色）
+        smoothed = _smooth_data(df[precision_col].values * 100)
+        axes[0].plot(df['epoch'], smoothed, color=SMOOTH_COLOR, linestyle=':', linewidth=3, alpha=0.8)
         axes[0].set_xlabel('Epoch')
         axes[0].set_ylabel('Precision (%)')
         axes[0].set_title('Validation Precision')
@@ -267,7 +319,10 @@ def plot_precision_recall(csv_path: Path, save_dir: Path):
     # 右图：Recall
     if recall_col is not None:
         axes[1].plot(df['epoch'], df[recall_col] * 100,
-                    color=COLORS[3], linewidth=2, marker='s', markersize=4, label='Recall')
+                    color=COLORS[3], linewidth=3, marker='s', markersize=6, label='Recall')
+        # 添加平滑虚线（黄色）
+        smoothed = _smooth_data(df[recall_col].values * 100)
+        axes[1].plot(df['epoch'], smoothed, color=SMOOTH_COLOR, linestyle=':', linewidth=3, alpha=0.8)
         axes[1].set_xlabel('Epoch')
         axes[1].set_ylabel('Recall (%)')
         axes[1].set_title('Validation Recall')
@@ -282,12 +337,11 @@ def plot_precision_recall(csv_path: Path, save_dir: Path):
         axes[1].set_yticks([])
         axes[1].set_title('Validation Recall')
 
-    plt.suptitle('Precision & Recall', fontsize=16, fontweight='bold')
+    plt.suptitle('Precision & Recall', fontsize=18, fontweight='bold')
     plt.tight_layout()
 
     save_path = save_dir / 'precision_recall.png'
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"Precision & Recall saved to: {save_path}")
     plt.close()
 
 
@@ -312,7 +366,7 @@ def plot_training_status(csv_path: Path, save_dir: Path):
     # 左图：训练时间
     if time_col is not None:
         axes[0].plot(df['epoch'], df[time_col],
-                    color=COLORS[4], linewidth=2, marker='o', markersize=4, label='Epoch Time')
+                    color=COLORS[4], linewidth=3, marker='o', markersize=6, label='Epoch Time')
         axes[0].set_xlabel('Epoch')
         axes[0].set_ylabel('Time (seconds)')
         axes[0].set_title('Epoch Training Time')
@@ -334,7 +388,7 @@ def plot_training_status(csv_path: Path, save_dir: Path):
     # 右图：学习率
     if lr_col is not None:
         axes[1].plot(df['epoch'], df[lr_col],
-                    color=COLORS[6], linewidth=2, marker='s', markersize=4, label='Learning Rate')
+                    color=COLORS[6], linewidth=3, marker='s', markersize=6, label='Learning Rate')
         axes[1].set_xlabel('Epoch')
         axes[1].set_ylabel('Learning Rate')
         axes[1].set_title('Learning Rate Schedule')
@@ -349,12 +403,11 @@ def plot_training_status(csv_path: Path, save_dir: Path):
         axes[1].set_yticks([])
         axes[1].set_title('Learning Rate Schedule')
 
-    plt.suptitle('Training Status', fontsize=16, fontweight='bold')
+    plt.suptitle('Training Status', fontsize=18, fontweight='bold')
     plt.tight_layout()
 
     save_path = save_dir / 'training_status.png'
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"Training status saved to: {save_path}")
     plt.close()
 
 
