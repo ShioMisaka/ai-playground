@@ -31,28 +31,25 @@ def _create_optimizer(model, lr: float):
 def _create_scheduler(optimizer, epochs: int, warmup_epochs: int = 3):
     """创建学习率调度器
 
-    使用 warmup + CosineAnnealingWarmRestarts 策略
-    周期性重启学习率，帮助模型跳出局部最优解
+    使用 CosineAnnealingLR 策略
+    学习率平滑下降，贯穿整个训练过程，无中途跳变
 
     Args:
         optimizer: 优化器
         epochs: 总训练轮数
-        warmup_epochs: warmup 轮数
+        warmup_epochs: warmup 轮数（预留参数，当前未启用）
 
     Returns:
         学习率调度器
     """
-    # T_0: 第一次重启的周期长度（epoch数）
-    # T_mult: 每次重启后周期长度的倍增因子
+    # T_max: 余弦退火周期长度（设置为总 epoch 数）
     # eta_min: 最小学习率
-    T_0 = 10
-    T_mult = 2
+    T_max = epochs
     eta_min = 1e-6
 
-    return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    return torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_0=T_0,
-        T_mult=T_mult,
+        T_max=T_max,
         eta_min=eta_min
     )
 
@@ -142,7 +139,7 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
         ema = ModelEMA(model, decay=0.9999)
         print("EMA: 启用 (decay=0.9999)")
     else:
-        print("EMA: 禁用")
+        print("EMA: 关闭")
 
     # 初始化日志记录器
     is_detection = hasattr(model, 'detect')
