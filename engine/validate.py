@@ -176,16 +176,20 @@ def validate(model, dataloader, device, nc=None, img_size=640):
         metrics['cls_loss'] = total_cls_loss / num_batches
         metrics['dfl_loss'] = total_dfl_loss / num_batches
 
-        # 计算 mAP50 和 mAP50-95
+        # 计算 mAP50、mAP50-95、precision、recall
         if nc is not None and len(all_detections) > 0:
             # 合并所有 batch 的 GT
             all_gt = torch.cat(all_gt_boxes, dim=0)
             map_results = compute_map50(all_detections, all_gt, nc, img_size=img_size)
             metrics['mAP50'] = map_results['mAP50']
             metrics['mAP50-95'] = map_results['mAP50-95']
+            metrics['precision'] = map_results['precision']
+            metrics['recall'] = map_results['recall']
         else:
             metrics['mAP50'] = 0.0
             metrics['mAP50-95'] = 0.0
+            metrics['precision'] = 0.0
+            metrics['recall'] = 0.0
     else:
         # 分类任务：计算准确率
         if nc is not None and all_predictions:

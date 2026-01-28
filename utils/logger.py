@@ -36,10 +36,11 @@ class TrainingLogger:
         """获取 CSV 字段名（YOLO 风格：使用斜杠层级）"""
         base_fields = ['epoch', 'time', 'lr', 'train/loss', 'val/loss']
         if self.is_detection:
-            # 检测任务：添加损失分量和 mAP 指标
+            # 检测任务：添加损失分量和评估指标
             base_fields.extend([
                 'train/box_loss', 'train/cls_loss', 'train/dfl_loss',
                 'val/box_loss', 'val/cls_loss', 'val/dfl_loss',
+                'metrics/precision(B)', 'metrics/recall(B)',
                 'metrics/mAP50(B)', 'metrics/mAP50-95(B)'
             ])
         else:
@@ -92,6 +93,12 @@ class TrainingLogger:
             row['metrics/mAP50(B)'] = f'{map50:.4f}' if map50 >= 0 else ''
             map50_95 = val_metrics.get('mAP50-95', 0)
             row['metrics/mAP50-95(B)'] = f'{map50_95:.4f}' if map50_95 >= 0 else ''
+
+            # precision 和 recall
+            precision = val_metrics.get('precision', 0)
+            row['metrics/precision(B)'] = f'{precision:.4f}' if precision >= 0 else ''
+            recall = val_metrics.get('recall', 0)
+            row['metrics/recall(B)'] = f'{recall:.4f}' if recall >= 0 else ''
         else:
             # 分类任务：accuracy
             row['train/accuracy'] = f'{train_metrics.get("accuracy", 0):.4f}'
