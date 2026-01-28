@@ -45,7 +45,10 @@ utils/      # 工具模块
 └── model_summary.py # print_model_summary()
 
 scripts/    # 脚本
-└── plot_curves.py   # 训练曲线绘制脚本
+├── plot_curves.py   # 训练曲线绘制脚本
+└── visualization/   # 可视化脚本
+
+tests/      # 单元测试
 ```
 
 ### Import Convention

@@ -107,7 +107,7 @@ python demos/yolov3_demo.py
 #### 2. 训练 YOLO + CoordAtt 检测器
 
 ```bash
-python visualization/visualize_trained_coordatt.py
+python scripts/visualization/visualize_trained_coordatt.py
 ```
 
 训练完成后会在 `outputs/yolo_coordatt_<timestamp>/` 生成：
@@ -119,7 +119,7 @@ python visualization/visualize_trained_coordatt.py
 #### 3. 对比 CoordAtt vs CoordCrossAtt
 
 ```bash
-python visualization/compare_attention_mechanisms.py
+python scripts/visualization/compare_attention_mechanisms.py
 ```
 
 对比训练会在 `outputs/attention_comparison/run_<timestamp>/` 生成：
@@ -162,10 +162,10 @@ ai-playground/
 │   └── model_summary.py    # print_model_summary()
 │
 ├── scripts/                # 脚本
-│   └── plot_curves.py      # 训练曲线绘制脚本
+│   ├── plot_curves.py      # 训练曲线绘制脚本
+│   └── visualization/      # 可视化脚本
 │
 ├── tests/                  # 单元测试
-├── visualization/          # 可视化脚本
 ├── demos/                  # 快速演示脚本
 ├── datasets/               # 数据集存储
 └── outputs/                # 输出结果
