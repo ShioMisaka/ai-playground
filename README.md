@@ -24,27 +24,120 @@ conda activate torch_cpu
 
 ### 训练 YOLOv11（推荐）
 
+项目使用基于 YAML 的配置管理系统，支持分层配置和灵活覆盖。
+
+#### 方式 1: 使用 CLI 参数
+
+```bash
+# 基本训练
+python -m engine.train --name exp001 --epochs 100 --batch_size 16
+
+# 完整参数
+python -m engine.train \
+  --name exp001 \
+  --epochs 100 \
+  --batch_size 16 \
+  --lr 0.001 \
+  --device cuda
+
+# 嵌套参数覆盖
+python -m engine.train --name exp002 optimizer.lr=0.002 scheduler.min_lr=1e-7
+```
+
+#### 方式 2: 使用配置文件
+
+```bash
+# 使用预定义配置
+python -m engine.train --config configs/experiments/my_exp.yaml
+
+# 结合模型配置
+python -m engine.train \
+  --model-config configs/models/yolov11n.yaml \
+  --name exp003 \
+  --epochs 200
+```
+
+#### 方式 3: 在 Python 代码中训练
+
 ```python
 from models import YOLOv11
 from engine import train
+from utils.config import get_config
 
-# 创建模型（支持动态缩放）
+# 创建配置（使用嵌套键名）
+cfg = get_config(
+    **{'train.name': 'exp001',
+       'train.epochs': 100,
+       'train.batch_size': 16,
+       'optimizer.lr': 0.001,
+       'system.device': 'cuda'}
+)
+
+# 创建模型
 model = YOLOv11(nc=2, scale='s')
 
-# 训练（包含 EMA、Mosaic 增强、损失分量跟踪、mAP 验证、曲线绘制）
-train(
-    model,
-    config_path='datasets/MY_TEST_DATA/data.yaml',
-    epochs=100,
-    batch_size=16,
-    img_size=640,
-    lr=0.001,
-    device='cuda',
-    save_dir='runs/train',
-    use_ema=True,          # 使用 EMA（推荐）
-    use_mosaic=True,       # 使用 Mosaic 增强
-    close_mosaic=10,       # 最后 10 个 epoch 关闭 Mosaic
-)
+# 开始训练
+train(model, cfg)
+```
+
+### 配置系统说明
+
+**配置优先级：**
+1. 默认配置 (`configs/default.yaml`)
+2. 模型配置 (`configs/models/*.yaml`)
+3. 用户配置（配置文件 OR CLI 参数）
+
+**配置文件结构：**
+```
+configs/
+├── default.yaml      # 全局默认配置
+├── models/           # 模型配置
+│   ├── yolov11n.yaml
+│   └── yolov11s.yaml
+└── experiments/      # 用户实验配置
+    └── my_exp.yaml
+```
+
+**CLI 参数：**
+- `--config`: 配置文件路径
+- `--model-config`: 模型配置文件路径
+- `--name`: 实验名称（必填）
+- `--epochs`, `--batch-size`, `--lr`, `--device`: 快捷参数
+- `optimizer.lr=0.001`: 嵌套参数覆盖
+
+### 默认配置 (configs/default.yaml)
+
+```yaml
+train:
+  epochs: 100
+  batch_size: 16
+  name: null              # 必填项
+  save_dir: runs/train
+
+optimizer:
+  type: Adam
+  lr: 0.001
+  betas: [0.9, 0.999]
+  eps: 1.0e-08
+
+scheduler:
+  type: CosineAnnealingLR
+  min_lr: 1.0e-06
+
+model:
+  nc: 80                  # 默认类别数
+  scale: n                # 模型规模
+  img_size: 640
+  use_ema: true
+  ema_decay: 0.9999
+
+augment:
+  use_mosaic: true
+  close_mosaic: 10        # 最后 10 个 epoch 关闭 Mosaic
+
+system:
+  device: cuda
+  workers: 0
 ```
 
 **训练输出（LiveTable 动态刷新）：**
@@ -152,6 +245,7 @@ ai-playground/
 │   └── detector.py         # 检测器专用训练逻辑
 │
 ├── utils/                  # 工具模块
+│   ├── config.py           # 配置管理系统
 │   ├── load.py             # create_dataloaders()
 │   ├── logger.py           # TrainingLogger, LiveTableLogger
 │   ├── metrics.py          # compute_map50()
@@ -160,6 +254,13 @@ ai-playground/
 │   ├── transforms.py       # MosaicTransform, MixupTransform
 │   ├── ema.py              # ModelEMA 指数移动平均
 │   └── model_summary.py    # print_model_summary()
+│
+├── configs/                # 配置文件
+│   ├── default.yaml        # 全局默认配置
+│   ├── models/             # 模型配置
+│   │   ├── yolov11n.yaml
+│   │   └── yolov11s.yaml
+│   └── experiments/        # 用户实验配置
 │
 ├── scripts/                # 脚本
 │   ├── plot_curves.py      # 训练曲线绘制脚本
