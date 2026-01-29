@@ -20,6 +20,6 @@ trained_model = train(
     use_ema=True,          # 使用 EMA（推荐）
     use_mosaic=True,       # 使用 Mosaic 增强
     close_mosaic=10,       # 最后 10 个 epoch 关闭 Mosaic
-    device='cuda',
+    device='cpu',
     save_dir='outputs/train/exp'
 )

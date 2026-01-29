@@ -37,14 +37,12 @@ class YOLODataset(Dataset):
             self.img_files.extend(list(self.img_dir.glob(ext.upper())))
         
         self.img_files = sorted(self.img_files)
-        
+
         # 对应的标签文件
         self.label_files = [
-            self.label_dir / f"{img_file.stem}.txt" 
+            self.label_dir / f"{img_file.stem}.txt"
             for img_file in self.img_files
         ]
-        
-        print(f"找到 {len(self.img_files)} 张图片")
     
     def __len__(self):
         return len(self.img_files)
@@ -144,18 +142,13 @@ def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0):
     else:
         # 使用配置中的path
         root_path = Path(config['path'])
-    
-    print(f"数据集根路径: {root_path}")
-    
+
     # 创建训练集
     # config['train'] 是 'images/train'
     train_img_dir = root_path / config['train']
     # 将 'images/train' 替换为 'labels/train'
     train_label_path = config['train'].replace('images', 'labels')
     train_label_dir = root_path / train_label_path
-    
-    print(f"训练集图片路径: {train_img_dir}")
-    print(f"训练集标签路径: {train_label_dir}")
     
     train_dataset = YOLODataset(
         img_dir=train_img_dir,
@@ -178,9 +171,6 @@ def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0):
     val_img_dir = root_path / config['val']
     val_label_path = config['val'].replace('images', 'labels')
     val_label_dir = root_path / val_label_path
-    
-    print(f"验证集图片路径: {val_img_dir}")
-    print(f"验证集标签路径: {val_label_dir}")
     
     val_dataset = YOLODataset(
         img_dir=val_img_dir,

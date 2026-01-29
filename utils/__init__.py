@@ -37,6 +37,10 @@ from .ema import ModelEMA
 from .model_summary import (
     print_training_info,
     print_model_summary,
+    print_training_setup,
+    print_training_completion,
+    print_mosaic_disabled,
+    print_plotting_status,
     get_model_summary,
     count_layers,
     estimate_flops,
@@ -80,6 +84,10 @@ __all__ = [
     # 模型和训练信息
     'print_training_info',
     'print_model_summary',
+    'print_training_setup',
+    'print_training_completion',
+    'print_mosaic_disabled',
+    'print_plotting_status',
     'get_model_summary',
     'count_layers',
     'estimate_flops',

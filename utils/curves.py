@@ -52,7 +52,7 @@ class StyleConfig:
     grid_alpha: float = 0.3
 
     # 平滑参数
-    smooth_window_length: int = 5
+    smooth_window_length: int = 19
     smooth_polyorder: int = 2
 
 

@@ -14,7 +14,7 @@ from .training import train_one_epoch, print_metrics
 from .validate import validate
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
                    print_training_info, print_model_summary, print_detection_header, get_save_dir,
-                   ModelEMA)
+                   ModelEMA, print_training_completion, print_mosaic_disabled, print_plotting_status)
 from utils.transforms import MosaicTransform
 
 
@@ -85,12 +85,8 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     Returns:
         训练后的模型
     """
-    # 打印训练配置信息
-    print_training_info(config_path, epochs, batch_size, img_size, lr, device, save_dir)
-
     # 创建保存目录（自动递增避免冲突）
     save_dir = get_save_dir(save_dir)
-    print(f"保存目录: {save_dir}")
 
     # 创建数据加载器
     train_loader, val_loader, config = create_dataloaders(
@@ -109,21 +105,30 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
             enable=True
         )
         train_loader.dataset.transform = mosaic_transform
-        print(f"Mosaic 增强: 启用 (最后 {close_mosaic} 个 epoch 关闭)")
     else:
         mosaic_transform = None
-        print("Mosaic 增强: 禁用")
 
     nc = config.get('nc')  # 类别数量
 
-    print(f"类别数: {nc}")
-    print(f"类别名称: {config.get('names', [])}")
-    print(f"训练集: {len(train_loader.dataset)} 张图片")
-    print(f"验证集: {len(val_loader.dataset)} 张图片")
+    # 打印训练配置信息（包含 Mosaic 和 EMA）
+    print_training_info(
+        config_path,
+        epochs,
+        batch_size,
+        img_size,
+        lr,
+        device,
+        save_dir,
+        num_train_samples=len(train_loader.dataset),
+        num_val_samples=len(val_loader.dataset),
+        nc=nc,
+        use_mosaic=use_mosaic and epochs > close_mosaic,
+        use_ema=use_ema,
+        close_mosaic=close_mosaic if use_mosaic and epochs > close_mosaic else None,
+    )
 
     # 设置设备
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
-    print(f"使用设备: {device}")
     model = model.to(device)
 
     # 打印模型摘要
@@ -137,9 +142,6 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     ema = None
     if use_ema:
         ema = ModelEMA(model, decay=0.9999)
-        print("EMA: 启用 (decay=0.9999)")
-    else:
-        print("EMA: 关闭")
 
     # 初始化日志记录器
     is_detection = hasattr(model, 'detect')
@@ -173,7 +175,7 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
                 # 关闭 Mosaic（最后 N 个 epoch）
                 if mosaic_transform is not None and epoch == epochs - close_mosaic:
                     mosaic_transform.enable = False
-                    print(f"\n[Epoch {epoch + 1}] 关闭 Mosaic 增强，使用原始数据精调")
+                    print_mosaic_disabled(epoch + 1)
 
                 # 训练一个 epoch
                 train_metrics = train_one_epoch(
@@ -232,11 +234,11 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
         # 强制停止 LiveTableLogger 并恢复光标
         live_logger.stop()
 
-    print("\n训练完成!")
-    print(f"训练日志已保存到: {csv_path}")
+    # 打印训练完成信息
+    print_training_completion(save_dir, csv_path, best_loss)
 
     # 绘制训练曲线
-    print("\n正在绘制训练曲线...")
+    print_plotting_status(csv_path, save_dir)
     plot_training_curves(csv_path, save_dir)
 
     return model
