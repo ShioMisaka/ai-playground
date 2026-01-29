@@ -67,25 +67,61 @@ from modules import Conv, CoordAtt
 
 ### Training YOLOv11
 
+使用配置系统训练（推荐）：
+
+```bash
+# 方式1: 使用 CLI 参数
+python -m engine.train --name exp001 --epochs 100 --batch_size 16
+
+# 方式2: 使用配置文件
+python -m engine.train --config configs/experiments/my_exp.yaml
+```
+
+在 Python 代码中训练：
+
 ```python
 from models import YOLOv11
 from engine import train
+from utils.config import get_config
 
-model = YOLOv11(nc=2, scale='n')  # scale: n/s/m/l/x
-train(
-    model,
-    config_path='datasets/MY_TEST_DATA/data.yaml',
-    epochs=100,
-    batch_size=16,
-    img_size=640,
-    lr=0.001,
-    device='cuda',
-    save_dir='runs/train',
-    use_ema=True,          # 使用 EMA（推荐）
-    use_mosaic=True,       # 使用 Mosaic 增强
-    close_mosaic=10,       # 最后 10 个 epoch 关闭 Mosaic
+# 创建配置（使用嵌套键名）
+cfg = get_config(
+    **{'train.name': 'exp001',
+       'train.epochs': 100,
+       'train.batch_size': 16}
 )
+
+# 创建并训练模型
+model = YOLOv11(nc=2, scale='n')  # scale: n/s/m/l/x
+train(model, cfg)
 ```
+
+### Configuration System
+
+项目使用基于 YAML 的配置管理系统，支持分层配置和灵活覆盖。
+
+**配置优先级：**
+1. 默认配置 (`configs/default.yaml`)
+2. 模型配置 (`configs/models/*.yaml`)
+3. 用户配置（配置文件 OR CLI 参数）
+
+**配置文件结构：**
+```
+configs/
+├── default.yaml      # 全局默认配置
+├── models/           # 模型配置
+│   ├── yolov11n.yaml
+│   └── yolov11s.yaml
+└── experiments/      # 用户实验配置
+    └── my_exp.yaml
+```
+
+**CLI 参数：**
+- `--config`: 配置文件路径
+- `--model-config`: 模型配置文件路径
+- `--name`: 实验名称（必填）
+- `--epochs`, `--batch-size`, `--lr`, `--device`: 快捷参数
+- `optimizer.lr=0.001`: 嵌套参数覆盖
 
 ### Auto-Increment Save Directory
 
