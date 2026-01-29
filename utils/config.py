@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 import yaml
 
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+console = Console()
+
 
 def load_yaml(file_path: str) -> Dict[str, Any]:
     """
@@ -372,3 +378,55 @@ def parse_args() -> argparse.Namespace:
         overrides_dict['train.device'] = args.device
 
     return args
+
+
+def print_config(cfg: Dict[str, Any]) -> None:
+    """
+    使用 Rich 库格式化打印配置信息。
+
+    Args:
+        cfg: 配置字典
+    """
+    console.print()
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="cyan", width=15)
+    table.add_column(style="green")
+
+    _add_section(table, "System", cfg.get('system', {}))
+    _add_section(table, "Dataset", {'data': cfg.get('data')})
+    _add_section(table, "Training", cfg.get('train', {}))
+    _add_section(table, "Optimizer", cfg.get('optimizer', {}))
+    _add_section(table, "Scheduler", cfg.get('scheduler', {}))
+    _add_section(table, "Model", cfg.get('model', {}))
+    _add_section(table, "Augmentation", cfg.get('augment', {}))
+
+    panel = Panel(
+        table,
+        title="[bold yellow]⚙️ Training Configuration[/bold yellow]",
+        border_style="bright_blue",
+        padding=(0, 1),
+    )
+
+    console.print(panel)
+    console.print()
+
+
+def _add_section(table: Table, title: str, section: Dict[str, Any]) -> None:
+    """
+    添加配置区块到 Rich 表格。
+
+    Args:
+        table: Rich 表格对象
+        title: 区块标题
+        section: 配置区块字典
+    """
+    if not section:
+        return
+
+    table.add_row("", "")
+    table.add_row(f"[bold white]{title}[/bold white]", "")
+
+    for key, value in section.items():
+        if value is not None:
+            table.add_row(key, str(value))
