@@ -100,17 +100,17 @@ def count_layers(model: nn.Module) -> int:
 
 def estimate_flops(model: nn.Module, img_size: int) -> float:
     """粗略估计 FLOPs"""
-    try:
-        from thop import profile
-        input_tensor = torch.randn(1, 3, img_size, img_size)
-        # Suppress thop printing
-        import contextlib
-        import io
-        with contextlib.redirect_stdout(io.StringIO()):
-             flops, _ = profile(model, inputs=(input_tensor,), verbose=False)
-        return flops / 1e9
-    except (ImportError, Exception):
-        pass
+    # try:
+    #     from thop import profile
+    #     input_tensor = torch.randn(1, 3, img_size, img_size)
+    #     # Suppress thop printing
+    #     import contextlib
+    #     import io
+    #     with contextlib.redirect_stdout(io.StringIO()):
+    #          flops, _ = profile(model, inputs=(input_tensor,), verbose=False)
+    #     return flops / 1e9
+    # except (ImportError, Exception):
+    #     pass
 
     total_params = sum(p.numel() for p in model.parameters())
     feature_map_size = (img_size / 32) ** 2
