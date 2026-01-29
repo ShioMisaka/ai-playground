@@ -4,6 +4,8 @@
 提供训练配置信息和模型摘要的输出功能。
 使用 rich 库实现美观的终端界面展示。
 """
+import platform
+import sys
 import torch
 import torch.nn as nn
 from pathlib import Path
@@ -22,6 +24,37 @@ except ImportError:
     RICH_AVAILABLE = False
 
 console = Console() if RICH_AVAILABLE else None
+
+
+def get_device_info(device_str: str) -> str:
+    """获取设备信息型号
+
+    Args:
+        device_str: 设备字符串 (如 'cuda', 'cpu', 'cuda:0')
+
+    Returns:
+        设备信息字符串
+    """
+    device = torch.device(device_str)
+
+    if device.type == 'cuda':
+        # 获取 GPU 信息
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(device)
+            # 尝试获取更多 GPU 信息
+            try:
+                gpu_props = torch.cuda.get_device_properties(device)
+                total_memory_gb = gpu_props.total_memory / 1024**3
+                return f"{gpu_name} ({total_memory_gb:.1f} GB)"
+            except Exception:
+                return gpu_name
+        return "CUDA (unavailable)"
+    else:
+        # 获取 CPU 信息
+        cpu_info = platform.processor()
+        if not cpu_info:
+            cpu_info = platform.machine() or "Unknown CPU"
+        return f"{cpu_info}"
 
 
 def truncate_path(path: Path, max_parts: int = 3) -> str:
@@ -100,7 +133,8 @@ def print_training_info(
         print("=" * 60)
         print(f"  data: {config_path}")
         print(f"  epochs: {epochs}, batch_size: {batch_size}, img_size: {img_size}")
-        print(f"  lr: {lr}, device: {device}")
+        print(f"  lr: {lr}, device: {device} ({get_device_info(device)})")
+        print(f"  python: {sys.version.split()[0]}, pytorch: {torch.__version__}")
         print(f"  save_dir: {save_dir}")
         if num_train_samples is not None:
             print(f"  train_samples: {num_train_samples:,}")
@@ -123,7 +157,10 @@ def print_training_info(
     env_table = Table.grid(padding=(0, 2))
     env_table.add_column(style="cyan", width=12)
     env_table.add_column(style="green")
-    env_table.add_row("设备", str(device))
+    env_table.add_row("设备", f"[bold white]{str(device)}[/bold white]")
+    env_table.add_row("", f"[dim]{get_device_info(device)}[/dim]")
+    env_table.add_row("Python", f"[bold white]{sys.version.split()[0]}[/bold white]")
+    env_table.add_row("PyTorch", f"[bold white]{torch.__version__}[/bold white]")
     env_table.add_row("保存路径", truncate_path(save_dir))
 
     env_panel = Panel(
