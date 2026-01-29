@@ -91,15 +91,21 @@ def validate(model, dataloader, device, nc=None, img_size=640):
             loss_items = None  # Track loss_items for printing
             try:
                 outputs = model(imgs, targets)
-                # Check if outputs is tuple/list with 3 elements (new ultralytics-style format)
-                if isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
+                # 新格式：返回字典
+                if isinstance(outputs, dict):
+                    loss = outputs['loss']
+                    loss_items = outputs['loss_items']
+                    predictions = outputs['predictions']
+                elif isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
+                    # 旧格式兼容
                     loss_for_backward = outputs[0]
                     loss_items = outputs[1]
                     predictions = outputs[2] if len(outputs) > 2 else None
                     loss = loss_for_backward
                 else:
                     raise TypeError("Unexpected output format")
-            except TypeError:
+            except Exception:
+                # 兼容旧格式（如果需要）
                 outputs = model(imgs)
                 if hasattr(model, 'compute_loss'):
                     outputs = {'predictions': outputs, 'loss': model.compute_loss(outputs, targets)}
@@ -110,6 +116,7 @@ def validate(model, dataloader, device, nc=None, img_size=640):
                     outputs = {'loss': loss}
                 loss = outputs.get('loss', loss)
                 predictions = outputs.get('predictions', outputs)
+                loss_items = None
 
             # 确保loss是标量
             if hasattr(loss, 'dim') and loss.dim() > 0:
@@ -140,13 +147,17 @@ def validate(model, dataloader, device, nc=None, img_size=640):
                 model.detect.eval()
                 with torch.no_grad():
                     inference_preds = model(imgs)
-                    # inference_preds 是 (concatenated, dict) 格式
-                    if isinstance(inference_preds, tuple) and len(inference_preds) >= 1:
-                        pred_output = inference_preds[0]  # (bs, total_anchors, 4+nc)
-                        # 后处理：提取框、分数、标签
-                        batch_detections = _post_process_predictions(pred_output, img_size)
-                        all_detections.extend(batch_detections)
-                        all_gt_boxes.append(targets.cpu())
+                    # inference_preds 现在是 (bs, total_anchors, 4+nc) 格式
+                    if isinstance(inference_preds, torch.Tensor):
+                        pred_output = inference_preds
+                    elif isinstance(inference_preds, tuple) and len(inference_preds) >= 1:
+                        pred_output = inference_preds[0]  # 兼容旧格式
+                    else:
+                        pred_output = inference_preds
+                    # 后处理：提取框、分数、标签
+                    batch_detections = _post_process_predictions(pred_output, img_size)
+                    all_detections.extend(batch_detections)
+                    all_gt_boxes.append(targets.cpu())
                 # 恢复训练模式
                 model.detect.train()
             else:

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Union, List, Optional, Tuple, Dict
 import torchvision.ops as ops
 
-from models import YOLOv11
+# 延迟导入 YOLOv11 以避免循环导入
+# 在需要时从 models.yolov11 导入
 
 
 class LetterBox:
@@ -414,7 +415,8 @@ class YOLO:
         nc = self._infer_nc(state_dict)
         scale = self._infer_scale(state_dict)
 
-        # 创建模型
+        # 创建模型（延迟导入以避免循环导入）
+        from models.yolov11 import YOLOv11
         self.model = YOLOv11(nc=nc, scale=scale)
         self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()

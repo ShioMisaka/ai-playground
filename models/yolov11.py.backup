@@ -174,7 +174,7 @@ class YOLOv11(nn.Module):
 
     def forward(self, x: torch.Tensor, targets=None):
         """
-        前向传播
+        Forward pass
 
         Args:
             x: input images [batch, 3, height, width]
@@ -183,13 +183,7 @@ class YOLOv11(nn.Module):
 
         Returns:
             If targets is None: predictions (inference mode)
-                (bs, n_anchors, 4+nc) 格式的预测张量
-            If targets is provided: dict with loss and predictions (training mode)
-                {
-                    'loss': loss_for_backward,
-                    'loss_items': [box_loss, cls_loss, dfl_loss],
-                    'predictions': (bs, n_anchors, 4+nc)
-                }
+            If targets is provided: dict with 'predictions' and 'loss'
         """
         # ===== Backbone =====
         x = self.conv0(x)           # 0
@@ -228,27 +222,13 @@ class YOLOv11(nn.Module):
         p5 = self.c3k2_22(x)                # 22
 
         # ===== Detection Head =====
-        # detect.forward() 现在始终返回 (bs, n_anchors, 4+nc) 格式
         predictions = self.detect([p3, p4, p5])
 
-        # 如果提供了 targets，计算 loss
+        # If targets provided, compute loss
         if targets is not None:
-            # 从 detect 的属性获取中间值
-            cls_outputs = self.detect._cls_outputs
-            reg_outputs = self.detect._reg_outputs
+            # Anchor-free: predictions is {'cls': [...], 'reg': [...]}
+            # loss_fn returns (loss * batch_size, loss.detach()) following ultralytics format
+            loss_for_backward, loss_items = self.loss_fn(predictions, targets)
+            return loss_for_backward, loss_items, predictions
 
-            # 构建 loss 字典
-            loss_dict = {'cls': cls_outputs, 'reg': reg_outputs}
-
-            # 计算损失
-            loss_for_backward, loss_items = self.loss_fn(loss_dict, targets)
-
-            # 返回字典格式
-            return {
-                'loss': loss_for_backward,
-                'loss_items': loss_items,
-                'predictions': predictions
-            }
-
-        # 推理模式：只返回预测
         return predictions

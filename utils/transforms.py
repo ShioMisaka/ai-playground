@@ -88,61 +88,77 @@ class MosaicTransform:
         for i, (img_i, boxes_i) in enumerate(zip(imgs, box_list)):
             x1, y1, x2, y2 = positions[i]
 
-            # 调整图片大小以填充该区域
+            # 象限尺寸
             w = x2 - x1
             h = y2 - y1
-            img_resized = img_i.resize((w, h), Image.BILINEAR)
+
+            # 关键修复：使用 letterbox 保持宽高比，而不是强制拉伸
+            img_w, img_h = img_i.size
+            scale = min(w / img_w, h / img_h)
+            scaled_w = int(round(img_w * scale))
+            scaled_h = int(round(img_h * scale))
+
+            # 缩放图像（保持宽高比）
+            img_resized = img_i.resize((scaled_w, scaled_h), Image.BILINEAR)
+
+            # 计算粘贴位置（居中）
+            paste_x = x1 + (w - scaled_w) // 2
+            paste_y = y1 + (h - scaled_h) // 2
 
             # 粘贴到画布
-            mosaic_img.paste(img_resized, (x1, y1))
+            mosaic_img.paste(img_resized, (paste_x, paste_y))
 
             # 调整 boxes 坐标
             if boxes_i.shape[0] > 0:
-                # 归一化坐标转像素坐标
+                # 归一化坐标转像素坐标（在缩放后的图像中）
                 boxes_px = boxes_i.clone()
-                boxes_px[:, 1] *= w  # x_center
-                boxes_px[:, 2] *= h  # y_center
-                boxes_px[:, 3] *= w  # width
-                boxes_px[:, 4] *= h  # height
+                boxes_px[:, 1] *= scaled_w  # x_center
+                boxes_px[:, 2] *= scaled_h  # y_center
+                boxes_px[:, 3] *= scaled_w  # width
+                boxes_px[:, 4] *= scaled_h  # height
 
                 # 转换为 x1y1x2y2
-                x1_boxes = boxes_px[:, 1] - boxes_px[:, 3] / 2
-                y1_boxes = boxes_px[:, 2] - boxes_px[:, 4] / 2
-                x2_boxes = boxes_px[:, 1] + boxes_px[:, 3] / 2
-                y2_boxes = boxes_px[:, 2] + boxes_px[:, 4] / 2
+                bx1 = boxes_px[:, 1] - boxes_px[:, 3] / 2
+                by1 = boxes_px[:, 2] - boxes_px[:, 4] / 2
+                bx2 = boxes_px[:, 1] + boxes_px[:, 3] / 2
+                by2 = boxes_px[:, 2] + boxes_px[:, 4] / 2
 
-                # 加上偏移量
-                x1_boxes += x1
-                y1_boxes += y1
-                x2_boxes += x1
-                y2_boxes += y1
+                # 加上粘贴位置偏移
+                bx1 += paste_x
+                by1 += paste_y
+                bx2 += paste_x
+                by2 += paste_y
 
                 # 裁剪到画布范围内
-                x1_boxes = x1_boxes.clamp(0, self.img_size * 2)
-                y1_boxes = y1_boxes.clamp(0, self.img_size * 2)
-                x2_boxes = x2_boxes.clamp(0, self.img_size * 2)
-                y2_boxes = y2_boxes.clamp(0, self.img_size * 2)
+                bx1 = bx1.clamp(0, self.img_size * 2)
+                by1 = by1.clamp(0, self.img_size * 2)
+                bx2 = bx2.clamp(0, self.img_size * 2)
+                by2 = by2.clamp(0, self.img_size * 2)
 
                 # 过滤掉无效的框（面积太小或越界）
-                valid_mask = (x2_boxes > x1_boxes) & (y2_boxes > y1_boxes)
-                valid_mask &= ((x2_boxes - x1_boxes) * (y2_boxes - y1_boxes)) > 4  # 最小面积 4 像素
+                valid_mask = (bx2 > bx1) & (by2 > by1)
+                valid_mask &= ((bx2 - bx1) * (by2 - by1)) > 4  # 最小面积 4 像素
 
                 if valid_mask.any():
                     # 转换回归一化坐标（相对于整张 mosaic 图片）
                     new_boxes = boxes_i[valid_mask].clone()
-                    new_boxes[:, 1] = ((x1_boxes[valid_mask] + x2_boxes[valid_mask]) / 2) / (self.img_size * 2)
-                    new_boxes[:, 2] = ((y1_boxes[valid_mask] + y2_boxes[valid_mask]) / 2) / (self.img_size * 2)
-                    new_boxes[:, 3] = (x2_boxes[valid_mask] - x1_boxes[valid_mask]) / (self.img_size * 2)
-                    new_boxes[:, 4] = (y2_boxes[valid_mask] - y1_boxes[valid_mask]) / (self.img_size * 2)
+                    new_boxes[:, 1] = ((bx1[valid_mask] + bx2[valid_mask]) / 2) / (self.img_size * 2)
+                    new_boxes[:, 2] = ((by1[valid_mask] + by2[valid_mask]) / 2) / (self.img_size * 2)
+                    new_boxes[:, 3] = (bx2[valid_mask] - bx1[valid_mask]) / (self.img_size * 2)
+                    new_boxes[:, 4] = (by2[valid_mask] - by1[valid_mask]) / (self.img_size * 2)
 
                     mosaic_boxes.append(new_boxes)
 
         # 缩放回目标尺寸
         mosaic_img = mosaic_img.resize((self.img_size, self.img_size), Image.BILINEAR)
 
-        # 合并所有 boxes
+        # 关键修复：boxes 也需要相应缩放！
+        # 画布是 2*img_size，缩放到 img_size，所以坐标也要乘以 0.5
         if len(mosaic_boxes) > 0:
             mosaic_boxes = torch.cat(mosaic_boxes, dim=0)
+            # boxes 格式: [class_id, x_center, y_center, width, height]
+            # 只需要缩放坐标部分（索引 1-4），class_id 不变
+            mosaic_boxes[:, 1:] *= 0.5  # 所有坐标缩放 0.5
         else:
             mosaic_boxes = torch.zeros((0, 5), dtype=torch.float32)
 
