@@ -267,3 +267,49 @@ def train(model, cfg: dict, data_config=None):
     plot_training_curves(csv_path, save_dir)
 
     return model
+
+
+if __name__ == '__main__':
+    from utils.config import parse_args, get_config, print_config, _flatten_to_nested, _parse_value
+    from models import YOLOv11
+
+    # 解析 CLI 参数
+    args = parse_args()
+
+    # 收集覆盖参数
+    overrides = {}
+    for item in args.overrides:
+        if '=' in item:
+            key, value = item.split('=', 1)
+            overrides[key] = _parse_value(value)
+
+    # 构建 CLI 参数字典
+    kwargs = {
+        'name': args.name,
+        'data': args.data,
+        'epochs': args.epochs,
+        'batch_size': args.batch_size,
+        'lr': args.lr,
+        'device': args.device,
+        **overrides
+    }
+    # 过滤 None 值
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
+    # 获取配置
+    if args.config:
+        cfg = get_config(config_file=args.config, model_config=args.model_config)
+    else:
+        cfg = get_config(model_config=args.model_config, **kwargs)
+
+    # 打印配置
+    print_config(cfg)
+
+    # 创建模型
+    model_cfg = cfg.get('model', {})
+    nc = model_cfg.get('nc', 80)
+    scale = model_cfg.get('scale', 'n')
+    model = YOLOv11(nc=nc, scale=scale)
+
+    # 开始训练
+    train(model, cfg)
