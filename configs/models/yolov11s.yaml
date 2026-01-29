@@ -1,0 +1,4 @@
+# YOLOv11-small 模型配置
+model:
+  nc: 2                       # 类别数
+  scale: s
