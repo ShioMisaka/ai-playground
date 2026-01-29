@@ -261,7 +261,6 @@ def train(model, cfg: dict, data_config=None):
     print_training_completion(save_dir, csv_path, best_loss)
 
     # 绘制训练曲线
-    print_plotting_status(csv_path, save_dir)
     plot_training_curves(csv_path, save_dir)
 
     return model

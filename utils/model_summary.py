@@ -100,17 +100,6 @@ def count_layers(model: nn.Module) -> int:
 
 def estimate_flops(model: nn.Module, img_size: int) -> float:
     """粗略估计 FLOPs"""
-    # try:
-    #     from thop import profile
-    #     input_tensor = torch.randn(1, 3, img_size, img_size)
-    #     # Suppress thop printing
-    #     import contextlib
-    #     import io
-    #     with contextlib.redirect_stdout(io.StringIO()):
-    #          flops, _ = profile(model, inputs=(input_tensor,), verbose=False)
-    #     return flops / 1e9
-    # except (ImportError, Exception):
-    #     pass
 
     total_params = sum(p.numel() for p in model.parameters())
     feature_map_size = (img_size / 32) ** 2
@@ -428,13 +417,6 @@ def print_training_completion(save_dir: Path, csv_path: Path, best_loss: float =
 
 def print_mosaic_disabled(epoch: int):
     if RICH_AVAILABLE:
-        console.print(f"\n[bold cyan][Epoch {epoch}][/bold cyan] [yellow]关闭 Mosaic 增强，使用原始数据精调[/yellow]")
+        console.print(f"[bold cyan][Epoch {epoch}][/bold cyan] [yellow]关闭 Mosaic 增强，使用原始数据精调[/yellow]\n")
     else:
-        print(f"\n[Epoch {epoch}] 关闭 Mosaic 增强")
-
-
-def print_plotting_status(csv_path: Path, save_dir: Path):
-    if RICH_AVAILABLE:
-        console.print("\n[bold cyan]正在绘制训练曲线...[/bold cyan]")
-    else:
-        print("\n正在绘制训练曲线...")
+        print(f"[Epoch {epoch}] 关闭 Mosaic 增强\n")

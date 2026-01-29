@@ -516,13 +516,8 @@ def plot_training_curves(csv_path: Path, save_dir: Path) -> None:
     csv_path = Path(csv_path)
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"\nGenerating training curves from: {csv_path}")
-
     # 绘制四张图
     plot_loss_analysis(csv_path, save_dir)
     plot_map_performance(csv_path, save_dir)
     plot_precision_recall(csv_path, save_dir)
     plot_training_status(csv_path, save_dir)
-
-    print(f"\nAll curves saved to: {save_dir}")
