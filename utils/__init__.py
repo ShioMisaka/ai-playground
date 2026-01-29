@@ -36,6 +36,9 @@ from .table import (
 # EMA
 from .ema import ModelEMA
 
+# 预测接口
+from engine.predict import YOLO, LetterBox, Results, Boxes
+
 # 模型和训练信息输出
 from .model_summary import (
     print_training_info,
@@ -45,7 +48,6 @@ from .model_summary import (
     print_training_setup,
     print_training_completion,
     print_mosaic_disabled,
-    print_plotting_status,
     get_model_summary,
     count_layers,
     estimate_flops,
@@ -93,6 +95,12 @@ __all__ = [
     # EMA
     'ModelEMA',
 
+    # 预测接口
+    'YOLO',
+    'LetterBox',
+    'Results',
+    'Boxes',
+
     # 模型和训练信息
     'print_training_info',
     'create_training_info_panels',
@@ -101,7 +109,6 @@ __all__ = [
     'print_training_setup',
     'print_training_completion',
     'print_mosaic_disabled',
-    'print_plotting_status',
     'get_model_summary',
     'count_layers',
     'estimate_flops',
