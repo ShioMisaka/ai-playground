@@ -41,10 +41,26 @@ def get_device_info(device_str: str) -> str:
                 return gpu_name
         return "CUDA (unavailable)"
     else:
-        cpu_info = platform.processor()
-        if not cpu_info:
-            cpu_info = platform.machine() or "Unknown CPU"
-        return f"{cpu_info}"
+        # 尝试从 /proc/cpuinfo 获取 CPU 型号
+        cpu_model = None
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                for line in f:
+                    if line.startswith('model name'):
+                        cpu_model = line.split(':', 1)[1].strip()
+                        break
+        except (FileNotFoundError, PermissionError, Exception):
+            pass
+
+        # Fallback: 使用 platform.processor()
+        if not cpu_model:
+            cpu_model = platform.processor()
+
+        # 如果仍然没有有效信息，使用架构
+        if not cpu_model or cpu_model in ['x86_64', 'aarch64', 'arm64', '']:
+            cpu_model = platform.machine() or "Unknown CPU"
+
+        return f"CPU ({cpu_model})"
 
 
 def truncate_path(path: Path, max_parts: int = 3) -> str:
@@ -138,8 +154,7 @@ def _create_info_tables(
     env_table = Table.grid(padding=(0, 2))
     env_table.add_column(style="cyan", width=12)
     env_table.add_column(style="green")
-    env_table.add_row("设备", f"[bold white]{str(device)}[/bold white]")
-    env_table.add_row("", f"[dim]{get_device_info(device)}[/dim]")
+    env_table.add_row("设备", f"[bold white]{get_device_info(device)}[/bold white]")
     env_table.add_row("Python", f"[bold white]{sys.version.split()[0]}[/bold white]")
     env_table.add_row("PyTorch", f"[bold white]{torch.__version__}[/bold white]")
     env_table.add_row("保存路径", truncate_path(Path(save_dir).resolve()))
@@ -291,22 +306,22 @@ def print_training_start_2x2(
 
     # 3. 创建 Panels，强制指定 height
     p_env = Panel(
-        t_env, title="[bold yellow]🚀 Environment[/bold yellow]",
+        t_env, title="[bold yellow]Environment[/bold yellow]",
         title_align="left", border_style="bright_blue", padding=(0, 1),
         height=row1_height
     )
     p_data = Panel(
-        t_data, title="[bold yellow]📊 Dataset[/bold yellow]",
+        t_data, title="[bold yellow]Dataset[/bold yellow]",
         title_align="left", border_style="bright_magenta", padding=(0, 1),
         height=row1_height
     )
     p_hyper = Panel(
-        t_hyper, title="[bold yellow]⚙️ Hyperparameters[/bold yellow]",
+        t_hyper, title="[bold yellow]Hyperparameters[/bold yellow]",
         title_align="left", border_style="bright_cyan", padding=(0, 1),
         height=row2_height
     )
     p_model = Panel(
-        t_model, title="[bold yellow]🧠 Model Summary[/bold yellow]",
+        t_model, title="[bold yellow]Model Summary[/bold yellow]",
         title_align="left", border_style="bright_yellow", padding=(0, 1),
         height=row2_height
     )
