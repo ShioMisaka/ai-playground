@@ -18,40 +18,53 @@ from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_tra
 from utils.transforms import MosaicTransform
 
 
-def _create_optimizer(model, lr: float):
-    """创建优化器"""
-    return torch.optim.Adam(
-        model.parameters(),
-        lr=lr,
-        betas=(0.9, 0.999),
-        eps=1e-8
-    )
+def _create_optimizer(model, cfg: dict):
+    """创建优化器
+
+    Args:
+        model: 模型
+        cfg: 完整配置字典
+
+    Returns:
+        优化器实例
+    """
+    optim_cfg = cfg['optimizer']
+    optimizer_type = optim_cfg.get('type', 'Adam')
+
+    if optimizer_type == 'Adam':
+        return torch.optim.Adam(
+            model.parameters(),
+            lr=optim_cfg['lr'],
+            betas=tuple(optim_cfg['betas']),
+            eps=optim_cfg['eps'],
+            weight_decay=optim_cfg.get('weight_decay', 0.0)
+        )
+
+    raise ValueError(f"Unsupported optimizer: {optimizer_type}")
 
 
-def _create_scheduler(optimizer, epochs: int, warmup_epochs: int = 3):
+def _create_scheduler(optimizer, cfg: dict, epochs: int):
     """创建学习率调度器
-
-    使用 CosineAnnealingLR 策略
-    学习率平滑下降，贯穿整个训练过程，无中途跳变
 
     Args:
         optimizer: 优化器
-        epochs: 总训练轮数
-        warmup_epochs: warmup 轮数（预留参数，当前未启用）
+        cfg: 完整配置字典
+        epochs: 训练总轮数
 
     Returns:
-        学习率调度器
+        学习率调度器实例
     """
-    # T_max: 余弦退火周期长度（设置为总 epoch 数）
-    # eta_min: 最小学习率
-    T_max = epochs
-    eta_min = 1e-6
+    sched_cfg = cfg['scheduler']
+    scheduler_type = sched_cfg.get('type', 'CosineAnnealingLR')
 
-    return torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=T_max,
-        eta_min=eta_min
-    )
+    if scheduler_type == 'CosineAnnealingLR':
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=epochs,
+            eta_min=sched_cfg.get('min_lr', 1e-6)
+        )
+
+    raise ValueError(f"Unsupported scheduler: {scheduler_type}")
 
 
 def _save_checkpoint(model, optimizer, epoch, loss, save_path: Path):
