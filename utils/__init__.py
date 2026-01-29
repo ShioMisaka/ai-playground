@@ -1,7 +1,7 @@
 # utils/__init__.py
 
 # 配置管理
-from .config import load_yaml, merge_configs, get_config
+from .config import load_yaml, merge_configs, get_config, parse_args
 
 # 模型缩放工具
 from .scaling import make_divisible, compute_channels, compute_depth
@@ -55,6 +55,7 @@ __all__ = [
     'load_yaml',
     'merge_configs',
     'get_config',
+    'parse_args',
 
     # 模型缩放工具
     'make_divisible',

@@ -3,8 +3,10 @@
 
 提供 YAML 配置文件的加载、解析、合并和验证功能。
 """
+import argparse
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import yaml
 
 
@@ -151,3 +153,222 @@ def get_config(
         )
 
     return config
+
+
+def _parse_value(value: str) -> Union[int, float, bool, str]:
+    """
+    将字符串值转换为适当的 Python 类型（int/float/bool/str）。
+
+    尝试按以下顺序转换：
+    1. int (整数)
+    2. float (浮点数)
+    3. bool (布尔值: true/false/yes/no/on/off，不区分大小写)
+    4. str (默认字符串)
+
+    Args:
+        value: 要解析的字符串值
+
+    Returns:
+        转换后的值 (int, float, bool, 或 str)
+
+    Examples:
+        >>> _parse_value("42")
+        42
+        >>> _parse_value("3.14")
+        3.14
+        >>> _parse_value("true")
+        True
+        >>> _parse_value("hello")
+        'hello'
+    """
+    # 尝试解析为 int
+    try:
+        return int(value)
+    except ValueError:
+        pass
+
+    # 尝试解析为 float
+    try:
+        return float(value)
+    except ValueError:
+        pass
+
+    # 尝试解析为 bool
+    lower_value = value.lower()
+    if lower_value in ('true', 'yes', 'on', '1'):
+        return True
+    if lower_value in ('false', 'no', 'off', '0'):
+        return False
+
+    # 默认返回字符串
+    return value
+
+
+def parse_args() -> argparse.Namespace:
+    """
+    解析命令行参数，用于训练脚本的配置。
+
+    支持以下参数：
+    - --config: 训练配置文件路径
+    - --model-config: 模型配置文件路径
+    - --name: 实验名称（覆盖 train.name）
+    - --data: 数据集配置路径（覆盖 train.data）
+    - --epochs: 训练轮数（覆盖 train.epochs）
+    - --batch-size: 批次大小（覆盖 train.batch_size）
+    - --lr: 学习率（覆盖 train.lr）
+    - --device: 设备（cuda/cpu）（覆盖 train.device）
+    - overrides: 位置参数，用于嵌套配置覆盖（如 optimizer.lr=0.001）
+
+    Args:
+        无（通过 argparse 自动解析 sys.argv）
+
+    Returns:
+        argparse.Namespace: 包含解析后的参数
+        - config: str | None
+        - model_config: str | None
+        - name: str | None
+        - data: str | None
+        - epochs: int | None
+        - batch_size: int | None
+        - lr: float | None
+        - device: str | None
+        - overrides: Dict[str, Any]
+
+    Examples:
+        >>> # 命令行使用示例
+        >>> # python train.py --config configs/my_config.yaml --device cuda
+        >>> # python train.py --name exp1 --epochs 100 optimizer.lr=0.001
+    """
+    parser = argparse.ArgumentParser(
+        description='YOLO 训练脚本 - 支持配置文件和 CLI 参数覆盖',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例用法:
+  # 使用配置文件
+  python train.py --config configs/my_config.yaml
+
+  # 使用 CLI 参数
+  python train.py --name exp1 --epochs 100 --batch-size 16
+
+  # 混合使用配置文件和 CLI 覆盖
+  python train.py --config configs/base.yaml --lr 0.001
+
+  # 嵌套参数覆盖（支持任意层级）
+  python train.py --name exp1 optimizer.lr=0.001 train.amp=true
+
+  # 完整示例
+  python train.py \\
+    --model-config configs/models/yolov11n.yaml \\
+    --data datasets/coco8.yaml \\
+    --name my_experiment \\
+    --epochs 100 \\
+    --batch-size 16 \\
+    --lr 0.001 \\
+    --device cuda \\
+    optimizer.lr=0.001 \\
+    train.amp=true
+        """
+    )
+
+    # 主要配置参数
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='训练配置文件路径（YAML 格式）'
+    )
+
+    parser.add_argument(
+        '--model-config',
+        type=str,
+        default=None,
+        help='模型配置文件路径（如 configs/models/yolov11n.yaml）'
+    )
+
+    # 常用训练参数（支持快捷覆盖）
+    parser.add_argument(
+        '--name',
+        type=str,
+        default=None,
+        help='实验名称（覆盖 train.name）'
+    )
+
+    parser.add_argument(
+        '--data',
+        type=str,
+        default=None,
+        help='数据集配置路径（覆盖 train.data）'
+    )
+
+    parser.add_argument(
+        '--epochs',
+        type=int,
+        default=None,
+        help='训练轮数（覆盖 train.epochs）'
+    )
+
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=None,
+        help='批次大小（覆盖 train.batch_size）'
+    )
+
+    parser.add_argument(
+        '--lr',
+        '--learning-rate',
+        type=float,
+        default=None,
+        dest='lr',
+        help='学习率（覆盖 train.lr）'
+    )
+
+    parser.add_argument(
+        '--device',
+        type=str,
+        default=None,
+        choices=['cuda', 'cpu', 'auto'],
+        help='训练设备（覆盖 train.device）'
+    )
+
+    # 位置参数：嵌套配置覆盖（如 optimizer.lr=0.001）
+    parser.add_argument(
+        'overrides',
+        nargs=argparse.REMAINDER,
+        default=[],
+        help='嵌套配置覆盖（格式: key.subkey=value，如 optimizer.lr=0.001）'
+    )
+
+    args = parser.parse_args()
+
+    # 解析 overrides 参数（key=value 格式）
+    overrides_dict: Dict[str, Any] = {}
+    override_pattern = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_.]*)=(.+)$')
+
+    for override in args.overrides:
+        match = override_pattern.match(override)
+        if not match:
+            parser.error(f"无效的覆盖参数格式: {override}\n"
+                        f"期望格式: key.subkey=value (例如: optimizer.lr=0.001)")
+
+        key, value_str = match.groups()
+        overrides_dict[key] = _parse_value(value_str)
+
+    # 将解析后的 overrides 赋值回 args
+    args.overrides = overrides_dict
+
+    # 将快捷参数也转换为 overrides 字典格式（便于统一处理）
+    if args.name:
+        overrides_dict['train.name'] = args.name
+    if args.data:
+        overrides_dict['train.data'] = args.data
+    if args.epochs is not None:
+        overrides_dict['train.epochs'] = args.epochs
+    if args.batch_size is not None:
+        overrides_dict['train.batch_size'] = args.batch_size
+    if args.lr is not None:
+        overrides_dict['train.lr'] = args.lr
+    if args.device:
+        overrides_dict['train.device'] = args.device
+
+    return args
