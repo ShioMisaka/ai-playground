@@ -9,7 +9,7 @@ import sys
 import torch
 import torch.nn as nn
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 # 尝试导入 rich 库，如果不可用则使用 fallback
 try:
@@ -27,21 +27,12 @@ console = Console() if RICH_AVAILABLE else None
 
 
 def get_device_info(device_str: str) -> str:
-    """获取设备信息型号
-
-    Args:
-        device_str: 设备字符串 (如 'cuda', 'cpu', 'cuda:0')
-
-    Returns:
-        设备信息字符串
-    """
+    """获取设备信息型号"""
     device = torch.device(device_str)
 
     if device.type == 'cuda':
-        # 获取 GPU 信息
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(device)
-            # 尝试获取更多 GPU 信息
             try:
                 gpu_props = torch.cuda.get_device_properties(device)
                 total_memory_gb = gpu_props.total_memory / 1024**3
@@ -50,7 +41,6 @@ def get_device_info(device_str: str) -> str:
                 return gpu_name
         return "CUDA (unavailable)"
     else:
-        # 获取 CPU 信息
         cpu_info = platform.processor()
         if not cpu_info:
             cpu_info = platform.machine() or "Unknown CPU"
@@ -58,39 +48,76 @@ def get_device_info(device_str: str) -> str:
 
 
 def truncate_path(path: Path, max_parts: int = 3) -> str:
-    """截断路径，只保留最后几级目录
-
-    Args:
-        path: 文件路径
-        max_parts: 保留的目录级数
-
-    Returns:
-        截断后的路径字符串
-    """
+    """截断路径，只保留最后几级目录"""
     path_str = str(path)
     cwd = Path.cwd()
 
     try:
-        # 尝试获取相对路径
         rel_path = path.relative_to(cwd)
         if len(str(rel_path)) < len(path_str):
-            # 如果相对路径更短，使用相对路径
             parts = rel_path.parts
             if len(parts) > max_parts + 1:
                 return f".../{'/'.join(parts[-max_parts:])}"
             return str(rel_path)
     except ValueError:
-        # 无法获取相对路径，使用绝对路径
         pass
 
-    # 对于绝对路径，截断显示
     parts = path.parts
     if len(parts) > max_parts + 1:
         return f".../{'/'.join(parts[-max_parts:])}"
     return path_str
 
 
-def print_training_info(
+def format_number(num: int) -> str:
+    """格式化数字，添加千位分隔符"""
+    return f"{num:,}"
+
+
+def count_layers(model: nn.Module) -> int:
+    """计算模型层数"""
+    layer_count = 0
+    for module in model.modules():
+        if module is not model and list(module.children()) == []:
+            layer_count += 1
+    return layer_count
+
+
+def estimate_flops(model: nn.Module, img_size: int) -> float:
+    """粗略估计 FLOPs"""
+    try:
+        from thop import profile
+        input_tensor = torch.randn(1, 3, img_size, img_size)
+        # Suppress thop printing
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+             flops, _ = profile(model, inputs=(input_tensor,), verbose=False)
+        return flops / 1e9
+    except (ImportError, Exception):
+        pass
+
+    total_params = sum(p.numel() for p in model.parameters())
+    feature_map_size = (img_size / 32) ** 2
+    estimated_flops = total_params * 2 * feature_map_size * 0.1
+    return estimated_flops / 1e9
+
+
+def get_model_summary(model: nn.Module, img_size: int = 640) -> dict:
+    """获取模型摘要信息"""
+    num_layers = count_layers(model)
+    total_params = sum(p.numel() for p in model.parameters())
+    total_gradients = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    gflops = estimate_flops(model, img_size)
+
+    return {
+        'layers': num_layers,
+        'parameters': total_params,
+        'gradients': total_gradients,
+        'gflops': gflops
+    }
+
+
+def _create_info_tables(
     config_path,
     epochs,
     batch_size,
@@ -104,56 +131,10 @@ def print_training_info(
     use_mosaic: Optional[bool] = None,
     use_ema: Optional[bool] = None,
     close_mosaic: Optional[int] = None,
-):
-    """打印训练配置信息
-
-    Args:
-        config_path: 数据集配置文件路径
-        epochs: 训练轮数
-        batch_size: 批大小
-        img_size: 图像尺寸
-        lr: 学习率
-        device: 设备
-        save_dir: 保存目录
-        num_train_samples: 训练集样本数量
-        num_val_samples: 验证集样本数量
-        nc: 类别数量
-        use_mosaic: 是否启用 Mosaic 增强
-        use_ema: 是否启用 EMA
-        close_mosaic: 最后 N 个 epoch 关闭 Mosaic
-    """
-    # 获取绝对路径
-    config_path = Path(config_path).resolve()
-    save_dir = Path(save_dir).resolve()
-
-    # 如果没有 rich 库，使用简单的 fallback
-    if not RICH_AVAILABLE:
-        print("\n" + "=" * 60)
-        print("训练配置信息")
-        print("=" * 60)
-        print(f"  data: {config_path}")
-        print(f"  epochs: {epochs}, batch_size: {batch_size}, img_size: {img_size}")
-        print(f"  lr: {lr}, device: {device} ({get_device_info(device)})")
-        print(f"  python: {sys.version.split()[0]}, pytorch: {torch.__version__}")
-        print(f"  save_dir: {save_dir}")
-        if num_train_samples is not None:
-            print(f"  train_samples: {num_train_samples:,}")
-        if num_val_samples is not None:
-            print(f"  val_samples: {num_val_samples:,}")
-        if nc is not None:
-            print(f"  num_classes: {nc}")
-        if use_mosaic is not None:
-            status = f"启用 (最后 {close_mosaic} 个 epoch 关闭)" if use_mosaic and close_mosaic else ("启用" if use_mosaic else "禁用")
-            print(f"  mosaic: {status}")
-        if use_ema is not None:
-            print(f"  ema: {'启用 (decay=0.9999)' if use_ema else '关闭'}")
-        print("=" * 60 + "\n")
-        return
-
-    # 使用 rich 库创建美观的输出
-    console.print()
-
-    # Environment 板块
+) -> Tuple[Table, Table, Table]:
+    """仅创建内容表格，不创建 Panel。用于后续灵活布局。"""
+    
+    # --- Environment Table ---
     env_table = Table.grid(padding=(0, 2))
     env_table.add_column(style="cyan", width=12)
     env_table.add_column(style="green")
@@ -161,21 +142,13 @@ def print_training_info(
     env_table.add_row("", f"[dim]{get_device_info(device)}[/dim]")
     env_table.add_row("Python", f"[bold white]{sys.version.split()[0]}[/bold white]")
     env_table.add_row("PyTorch", f"[bold white]{torch.__version__}[/bold white]")
-    env_table.add_row("保存路径", truncate_path(save_dir))
+    env_table.add_row("保存路径", truncate_path(Path(save_dir).resolve()))
 
-    env_panel = Panel(
-        env_table,
-        title="[bold yellow]🚀 Environment[/bold yellow]",
-        title_align="left",
-        border_style="bright_blue",
-        padding=(0, 1),
-    )
-
-    # Dataset 板块
+    # --- Dataset Table ---
     dataset_table = Table.grid(padding=(0, 2))
     dataset_table.add_column(style="cyan", width=12)
     dataset_table.add_column(style="green")
-    dataset_table.add_row("配置文件", truncate_path(config_path))
+    dataset_table.add_row("配置文件", truncate_path(Path(config_path).resolve()))
     if nc is not None:
         dataset_table.add_row("类别数", str(nc))
     if num_train_samples is not None:
@@ -183,15 +156,7 @@ def print_training_info(
     if num_val_samples is not None:
         dataset_table.add_row("验证样本", f"{num_val_samples:,}")
 
-    dataset_panel = Panel(
-        dataset_table,
-        title="[bold yellow]📊 Dataset[/bold yellow]",
-        title_align="left",
-        border_style="bright_magenta",
-        padding=(0, 1),
-    )
-
-    # Hyperparameters 板块（包含 Mosaic 和 EMA）
+    # --- Hyperparameters Table ---
     hyper_table = Table.grid(padding=(0, 2))
     hyper_table.add_column(style="cyan", width=12)
     hyper_table.add_column(style="green")
@@ -200,9 +165,8 @@ def print_training_info(
     hyper_table.add_row("Epochs", f"[bold green]{epochs}[/bold green]")
     hyper_table.add_row("图像尺寸", f"[bold green]{img_size}[/bold green]")
 
-    # 添加 Mosaic 和 EMA 信息到 Hyperparameters
     if use_mosaic is not None or use_ema is not None:
-        hyper_table.add_row("", "")  # 空行分隔
+        hyper_table.add_row("", "")
 
     if use_mosaic is not None:
         if use_mosaic and close_mosaic and close_mosaic > 0:
@@ -217,309 +181,244 @@ def print_training_info(
         ema_val = "[bold green]启用[/bold green]" if use_ema else "[bold red]关闭[/bold red]"
         hyper_table.add_row("EMA", ema_val)
 
-    hyper_panel = Panel(
-        hyper_table,
-        title="[bold yellow]⚙️ Hyperparameters[/bold yellow]",
-        title_align="left",
-        border_style="bright_cyan",
-        padding=(0, 1),
-    )
-
-    # 使用 Columns 布局展示三个面板
-    panels = Columns([env_panel, dataset_panel, hyper_panel], equal=True)
-    console.print(panels)
-    console.print()
+    return env_table, dataset_table, hyper_table
 
 
-def count_layers(model: nn.Module) -> int:
-    """计算模型层数
-
-    Args:
-        model: PyTorch 模型
-
-    Returns:
-        层数
-    """
-    # 计算所有叶子模块（没有子模块的模块）
-    layer_count = 0
-    for module in model.modules():
-        if module is not model and list(module.children()) == []:
-            layer_count += 1
-    return layer_count
-
-
-def get_model_summary(model: nn.Module, img_size: int = 640) -> dict:
-    """获取模型摘要信息
-
-    Args:
-        model: PyTorch 模型
-        img_size: 输入图像尺寸
-
-    Returns:
-        包含层数、参数量、梯度数、FLOPs 的字典
-    """
-    # 计算层数
-    num_layers = count_layers(model)
-
-    # 计算参数量和梯度数
-    total_params = sum(p.numel() for p in model.parameters())
-    total_gradients = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    # 计算 FLOPs
-    gflops = estimate_flops(model, img_size)
-
-    return {
-        'layers': num_layers,
-        'parameters': total_params,
-        'gradients': total_gradients,
-        'gflops': gflops
-    }
-
-
-def estimate_flops(model: nn.Module, img_size: int) -> float:
-    """粗略估计 FLOPs
-
-    Args:
-        model: PyTorch 模型
-        img_size: 输入图像尺寸
-
-    Returns:
-        估计的 GFLOPs
-    """
-    # 尝试使用 thop 进行精确计算
-    try:
-        from thop import profile
-        input_tensor = torch.randn(1, 3, img_size, img_size)
-        flops, _ = profile(model, inputs=(input_tensor,), verbose=False)
-        return flops / 1e9
-    except ImportError:
-        pass
-
-    # Fallback: 粗略估计
-    total_params = sum(p.numel() for p in model.parameters())
-    feature_map_size = (img_size / 32) ** 2
-    estimated_flops = total_params * 2 * feature_map_size * 0.1
-    return estimated_flops / 1e9
-
-
-def format_number(num: int) -> str:
-    """格式化数字，添加千位分隔符
-
-    Args:
-        num: 数字
-
-    Returns:
-        格式化后的字符串
-    """
-    return f"{num:,}"
-
-
-def print_model_summary(model: nn.Module, img_size: int = 640, nc: Optional[int] = None):
-    """打印模型摘要信息
-
-    Args:
-        model: PyTorch 模型
-        img_size: 输入图像尺寸
-        nc: 类别数量（如果覆盖了模型默认值）
-    """
-    # 如果提供了类别数，检查是否需要覆盖
+def _create_model_table(model: nn.Module, img_size: int, nc: Optional[int] = None) -> Table:
+    """仅创建模型信息表格"""
+    # 覆盖 nc 逻辑
     if nc is not None:
         if hasattr(model, 'nc') and model.nc != nc:
-            if RICH_AVAILABLE:
-                console.print(f"[yellow]Overriding model nc={model.nc} with nc={nc}[/yellow]")
-            else:
-                print(f"Overriding model nc={model.nc} with nc={nc}")
+            # 注意：副作用，修改了模型属性
             model.nc = nc
-            # 如果有 detect 层，也需要更新
             if hasattr(model, 'detect'):
                 model.detect.nc = nc
                 model.detect.no = nc + 5
-
-    # 获取模型摘要
+    
     summary = get_model_summary(model, img_size)
     model_name = model.__class__.__name__
 
-    # 如果没有 rich 库，使用简单的 fallback
-    if not RICH_AVAILABLE:
-        print(f"\n{model_name} summary:")
-        print(f"  Layers: {summary['layers']}")
-        print(f"  Parameters: {format_number(summary['parameters'])}")
-        print(f"  Gradients: {format_number(summary['gradients'])}")
-        print(f"  GFLOPs: {summary['gflops']:.1f}")
-        print()
-        return
-
-    # 使用 rich 库创建美观的输出
-    # 创建模型信息表格
     model_table = Table.grid(padding=(0, 1))
     model_table.add_column(style="cyan", width=10)
     model_table.add_column()
-
     model_table.add_row("模型名称", f"[bold white]{model_name}[/bold white]")
     model_table.add_row("层数", f"[bold green]{summary['layers']}[/bold green]")
     model_table.add_row("参数量", f"[bold yellow]{format_number(summary['parameters'])}[/bold yellow]")
     model_table.add_row("梯度数", f"[bold green]{format_number(summary['gradients'])}[/bold green]")
     model_table.add_row("GFLOPs", f"[bold magenta]{summary['gflops']:.1f} GFLOPs[/bold magenta]")
+    
+    return model_table
 
-    model_panel = Panel(
-        model_table,
+
+def create_training_info_panels(
+    config_path, epochs, batch_size, img_size, lr, device, save_dir,
+    num_train_samples=None, num_val_samples=None, nc=None, 
+    use_mosaic=None, use_ema=None, close_mosaic=None,
+    panel_height=None, panel_width=None,
+):
+    """(旧接口) 创建训练配置信息的 Panels，主要用于非 2x2 布局的场景"""
+    
+    env_table, dataset_table, hyper_table = _create_info_tables(
+        config_path, epochs, batch_size, img_size, lr, device, save_dir,
+        num_train_samples, num_val_samples, nc, use_mosaic, use_ema, close_mosaic
+    )
+
+    env_panel = Panel(
+        env_table, title="[bold yellow]🚀 Environment[/bold yellow]",
+        title_align="left", border_style="bright_blue", padding=(0, 1),
+        height=panel_height, width=panel_width
+    )
+    dataset_panel = Panel(
+        dataset_table, title="[bold yellow]📊 Dataset[/bold yellow]",
+        title_align="left", border_style="bright_magenta", padding=(0, 1),
+        height=panel_height, width=panel_width
+    )
+    hyper_panel = Panel(
+        hyper_table, title="[bold yellow]⚙️ Hyperparameters[/bold yellow]",
+        title_align="left", border_style="bright_cyan", padding=(0, 1),
+        height=panel_height, width=panel_width
+    )
+
+    return env_panel, dataset_panel, hyper_panel
+
+
+def print_training_start_2x2(
+    config_path,
+    epochs,
+    batch_size,
+    img_size,
+    lr,
+    device,
+    save_dir,
+    model: nn.Module,
+    num_train_samples: Optional[int] = None,
+    num_val_samples: Optional[int] = None,
+    nc: Optional[int] = None,
+    use_mosaic: Optional[bool] = None,
+    use_ema: Optional[bool] = None,
+    close_mosaic: Optional[int] = None,
+):
+    """
+    打印训练开始信息（完美的 2x2 布局）
+    布局：
+    [ Environment ] [ Dataset   ]
+    [ Hyperparams ] [ Model     ]
+    保证：同行等高，同列等宽。
+    """
+    # Fallback for non-rich environments
+    if not RICH_AVAILABLE:
+        print("\n" + "=" * 60)
+        print("Training Config (Rich not installed)")
+        print(f"  Device: {device}")
+        print(f"  Model: {model.__class__.__name__}")
+        print("=" * 60 + "\n")
+        return
+
+    console.print()
+
+    # 1. 生成所有内容表格
+    t_env, t_data, t_hyper = _create_info_tables(
+        config_path, epochs, batch_size, img_size, lr, device, save_dir,
+        num_train_samples, num_val_samples, nc, use_mosaic, use_ema, close_mosaic
+    )
+    t_model = _create_model_table(model, img_size, nc)
+
+    # 2. 计算每一行的最大高度
+    # Panel 高度 = 内容行数 + 2 (Border) + 0 (Vertical Padding is 0 in (0,1))
+    # 为防万一，可以额外 +1 防止紧凑，这里使用标准的 +2
+    row1_height = max(t_env.row_count, t_data.row_count) + 2
+    row2_height = max(t_hyper.row_count, t_model.row_count) + 2
+
+    # 3. 创建 Panels，强制指定 height
+    p_env = Panel(
+        t_env, title="[bold yellow]🚀 Environment[/bold yellow]",
+        title_align="left", border_style="bright_blue", padding=(0, 1),
+        height=row1_height
+    )
+    p_data = Panel(
+        t_data, title="[bold yellow]📊 Dataset[/bold yellow]",
+        title_align="left", border_style="bright_magenta", padding=(0, 1),
+        height=row1_height
+    )
+    p_hyper = Panel(
+        t_hyper, title="[bold yellow]⚙️ Hyperparameters[/bold yellow]",
+        title_align="left", border_style="bright_cyan", padding=(0, 1),
+        height=row2_height
+    )
+    p_model = Panel(
+        t_model, title="[bold yellow]🧠 Model Summary[/bold yellow]",
+        title_align="left", border_style="bright_yellow", padding=(0, 1),
+        height=row2_height
+    )
+
+    # 4. 使用主布局 Grid 实现 2x2 对齐
+    # expand=True 确保占满宽度，ratio=1 确保两列等宽
+    grid = Table.grid(padding=(0, 1), expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
+
+    # 添加行
+    grid.add_row(p_env, p_data)
+    grid.add_row(p_hyper, p_model)
+
+    console.print(grid)
+    console.print()
+
+
+def print_training_info(
+    config_path, epochs, batch_size, img_size, lr, device, save_dir,
+    num_train_samples=None, num_val_samples=None, nc=None,
+    use_mosaic=None, use_ema=None, close_mosaic=None,
+):
+    """打印训练配置信息（三面板布局）"""
+    if not RICH_AVAILABLE:
+        # Fallback simplified
+        print(f"Training Info: Epochs={epochs}, Batch={batch_size}, Device={device}")
+        return
+
+    console.print()
+    # 使用 create_training_info_panels 获取默认高度的 panels
+    panels = create_training_info_panels(
+        config_path, epochs, batch_size, img_size, lr, device, save_dir,
+        num_train_samples, num_val_samples, nc, use_mosaic, use_ema, close_mosaic
+    )
+    # 使用 Columns 布局
+    console.print(Columns(panels, equal=True))
+    console.print()
+
+
+def print_model_summary(model: nn.Module, img_size: int = 640, nc: Optional[int] = None):
+    """单独打印模型摘要"""
+    if not RICH_AVAILABLE:
+        print(f"Model: {model}")
+        return
+
+    t_model = _create_model_table(model, img_size, nc)
+    p_model = Panel(
+        t_model,
         title="[bold yellow]🧠 Model Summary[/bold yellow]",
         title_align="left",
         border_style="bright_yellow",
         padding=(0, 1),
         expand=False,
     )
-
-    console.print(model_panel)
+    console.print(p_model)
     console.print()
 
 
-def print_training_setup(
-    use_mosaic: bool,
-    use_ema: bool,
-    close_mosaic: int,
-    num_train_samples: int,
-    num_val_samples: int,
-    nc: int,
-    class_names: list,
-    mosaic_enabled: bool = False,
-):
-    """打印训练设置信息
-
-    Args:
-        use_mosaic: 是否启用 Mosaic
-        use_ema: 是否启用 EMA
-        close_mosaic: 最后 N 个 epoch 关闭 Mosaic
-        num_train_samples: 训练集样本数
-        num_val_samples: 验证集样本数
-        nc: 类别数
-        class_names: 类别名称列表
-        mosaic_enabled: Mosaic 当前是否已启用（根据 epochs 判断）
-    """
-    # 如果没有 rich 库，使用简单的 fallback
+# 保持原有辅助函数不变
+def print_training_setup(use_mosaic, use_ema, close_mosaic, num_train_samples, num_val_samples, nc, class_names, mosaic_enabled=False):
     if not RICH_AVAILABLE:
-        print("\n训练设置:")
-        print(f"  Mosaic: {'启用' if mosaic_enabled else '禁用'}")
-        if mosaic_enabled and close_mosaic > 0:
-            print(f"    (最后 {close_mosaic} 个 epoch 关闭)")
-        print(f"  EMA: {'启用 (decay=0.9999)' if use_ema else '关闭'}")
-        print(f"  类别数: {nc}")
-        print(f"  类别名称: {class_names}")
-        print(f"  训练集: {num_train_samples:,} 张图片")
-        print(f"  验证集: {num_val_samples:,} 张图片")
-        print()
         return
-
-    # 使用 rich 库创建美观的输出
     console.print()
-
-    # 创建设置表格
     setup_table = Table.grid(padding=(0, 2))
     setup_table.add_column(style="cyan", width=12)
     setup_table.add_column()
 
-    # Mosaic 状态
     if mosaic_enabled:
-        mosaic_status = "[bold green]启用[/bold green]"
-        if close_mosaic > 0:
-            mosaic_status += f" (最后 {close_mosaic} 个 epoch 关闭)"
+        mosaic_status = f"[bold green]启用[/bold green] (最后 {close_mosaic} epoch 关闭)" if close_mosaic > 0 else "[bold green]启用[/bold green]"
     else:
         mosaic_status = "[bold red]禁用[/bold red]"
+    
     setup_table.add_row("Mosaic 增强", mosaic_status)
-
-    # EMA 状态
-    ema_status = "[bold green]启用[/bold green]" if use_ema else "[bold red]关闭[/bold red]"
-    if use_ema:
-        ema_status += " (decay=0.9999)"
-    setup_table.add_row("EMA", ema_status)
-
-    # 空行分隔
+    setup_table.add_row("EMA", "[bold green]启用[/bold green]" if use_ema else "[bold red]关闭[/bold red]")
     setup_table.add_row("", "")
-
-    # 数据集信息
     setup_table.add_row("类别数", f"[bold yellow]{nc}[/bold yellow]")
     setup_table.add_row("类别名称", str(class_names))
     setup_table.add_row("训练样本", f"[bold green]{num_train_samples:,}[/bold green]")
     setup_table.add_row("验证样本", f"[bold green]{num_val_samples:,}[/bold green]")
 
-    setup_panel = Panel(
-        setup_table,
-        title="[bold yellow]⚡ Training Setup[/bold yellow]",
-        title_align="left",
-        border_style="bright_green",
-        padding=(0, 1),
-    )
-
-    console.print(setup_panel)
+    console.print(Panel(setup_table, title="[bold yellow]⚡ Training Setup[/bold yellow]", title_align="left", border_style="bright_green", padding=(0, 1)))
     console.print()
 
 
 def print_training_completion(save_dir: Path, csv_path: Path, best_loss: float = None):
-    """打印训练完成信息
-
-    Args:
-        save_dir: 保存目录
-        csv_path: 训练日志 CSV 路径
-        best_loss: 最佳验证损失
-    """
-    # 如果没有 rich 库，使用简单的 fallback
     if not RICH_AVAILABLE:
-        print("\n" + "=" * 60)
-        print("训练完成!")
-        print("=" * 60)
-        print(f"  保存目录: {save_dir}")
-        print(f"  训练日志: {csv_path}")
-        if best_loss is not None:
-            print(f"  最佳损失: {best_loss:.4f}")
-        print("=" * 60 + "\n")
+        print(f"Done. Results at {save_dir}")
         return
-
-    # 使用 rich 库创建美观的输出
+        
     console.print()
-
-    # 创建完成信息表格
     completion_table = Table.grid(padding=(0, 1))
     completion_table.add_column(style="cyan", width=10)
     completion_table.add_column()
-
     completion_table.add_row("状态", "[bold green]✓ 训练完成[/bold green]")
-    completion_table.add_row("保存目录", truncate_path(save_dir))
-    completion_table.add_row("训练日志", truncate_path(csv_path))
+    completion_table.add_row("保存目录", truncate_path(Path(save_dir)))
+    completion_table.add_row("训练日志", truncate_path(Path(csv_path)))
     if best_loss is not None:
         completion_table.add_row("最佳损失", f"[bold yellow]{best_loss:.4f}[/bold yellow]")
 
-    completion_panel = Panel(
-        completion_table,
-        title="[bold yellow]✅ Training Complete[/bold yellow]",
-        title_align="left",
-        border_style="bright_green",
-        padding=(0, 1),
-        expand=False,
-    )
-
-    console.print(completion_panel)
+    console.print(Panel(completion_table, title="[bold yellow]✅ Training Complete[/bold yellow]", title_align="left", border_style="bright_green", padding=(0, 1), expand=False))
     console.print()
 
 
 def print_mosaic_disabled(epoch: int):
-    """打印 Mosaic 关闭通知
-
-    Args:
-        epoch: 当前 epoch
-    """
     if RICH_AVAILABLE:
         console.print(f"\n[bold cyan][Epoch {epoch}][/bold cyan] [yellow]关闭 Mosaic 增强，使用原始数据精调[/yellow]")
     else:
-        print(f"\n[Epoch {epoch}] 关闭 Mosaic 增强，使用原始数据精调")
+        print(f"\n[Epoch {epoch}] 关闭 Mosaic 增强")
 
 
 def print_plotting_status(csv_path: Path, save_dir: Path):
-    """打印训练曲线绘制状态
-
-    Args:
-        csv_path: CSV 日志路径
-        save_dir: 保存目录
-    """
     if RICH_AVAILABLE:
         console.print("\n[bold cyan]正在绘制训练曲线...[/bold cyan]")
     else:

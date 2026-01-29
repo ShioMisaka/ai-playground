@@ -13,7 +13,7 @@ from rich.console import Console
 from .training import train_one_epoch, print_metrics
 from .validate import validate
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
-                   print_training_info, print_model_summary, print_detection_header, get_save_dir,
+                   print_training_start_2x2, print_detection_header, get_save_dir,
                    ModelEMA, print_training_completion, print_mosaic_disabled, print_plotting_status)
 from utils.transforms import MosaicTransform
 
@@ -134,16 +134,21 @@ def train(model, cfg: dict, data_config=None):
 
     nc = config.get('nc')  # 类别数量
 
-    # 打印训练配置信息（包含 Mosaic 和 EMA）
-    device = sys_cfg['device']
-    print_training_info(
+    # 设置设备
+    device_str = sys_cfg['device']
+    device = torch.device(device_str if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
+
+    # 打印训练信息（2x2 布局：Environment + Dataset, Hyperparameters + Model Summary）
+    print_training_start_2x2(
         data_path,
         epochs,
         batch_size,
         img_size,
         cfg['optimizer']['lr'],
-        device,
+        device_str,
         save_dir,
+        model,
         num_train_samples=len(train_loader.dataset),
         num_val_samples=len(val_loader.dataset),
         nc=nc,
@@ -151,13 +156,6 @@ def train(model, cfg: dict, data_config=None):
         use_ema=use_ema,
         close_mosaic=close_mosaic if use_mosaic and epochs > close_mosaic else None,
     )
-
-    # 设置设备
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
-
-    # 打印模型摘要
-    print_model_summary(model, img_size, nc=nc)
 
     # 创建优化器和调度器
     optimizer = _create_optimizer(model, cfg)

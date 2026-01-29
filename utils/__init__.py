@@ -39,6 +39,8 @@ from .ema import ModelEMA
 # 模型和训练信息输出
 from .model_summary import (
     print_training_info,
+    create_training_info_panels,
+    print_training_start_2x2,
     print_model_summary,
     print_training_setup,
     print_training_completion,
@@ -93,6 +95,8 @@ __all__ = [
 
     # 模型和训练信息
     'print_training_info',
+    'create_training_info_panels',
+    'print_training_start_2x2',
     'print_model_summary',
     'print_training_setup',
     'print_training_completion',
