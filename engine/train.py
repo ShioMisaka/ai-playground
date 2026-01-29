@@ -77,36 +77,47 @@ def _save_checkpoint(model, optimizer, epoch, loss, save_path: Path):
     }, save_path)
 
 
-def train(model, config_path, epochs=100, batch_size=16, img_size=640,
-          lr=0.001, device='cuda', save_dir='runs/train',
-          use_ema=True, use_mosaic=True, close_mosaic=10):
+def train(model, cfg: dict, data_config=None):
     """完整训练流程
 
     Args:
-        model: 模型
-        config_path: 数据集配置文件路径
-        epochs: 训练轮数
-        batch_size: 批大小
-        img_size: 图像尺寸
-        lr: 学习率
-        device: 设备
-        save_dir: 保存目录
-        use_ema: 是否使用 EMA（指数移动平均）
-        use_mosaic: 是否使用 Mosaic 数据增强
-        close_mosaic: 最后 N 个 epoch 关闭 Mosaic（默认 10）
+        model: 模型实例
+        cfg: 训练配置字典（由 get_config() 生成）
+        data_config: 数据集配置字典（可选，从 data.yaml 加载）
 
     Returns:
         训练后的模型
     """
-    # 创建保存目录（自动递增避免冲突）
-    save_dir = get_save_dir(save_dir)
+    # 解析配置
+    train_cfg = cfg['train']
+    model_cfg = cfg['model']
+    augment_cfg = cfg['augment']
+    sys_cfg = cfg['system']
+
+    # 获取参数
+    epochs = train_cfg['epochs']
+    batch_size = train_cfg['batch_size']
+    name = train_cfg['name']
+    save_dir_base = train_cfg['save_dir']
+    img_size = model_cfg['img_size']
+    use_ema = model_cfg['use_ema']
+    ema_decay = model_cfg.get('ema_decay', 0.9999)
+    use_mosaic = augment_cfg['use_mosaic']
+    close_mosaic = augment_cfg['close_mosaic']
+    workers = sys_cfg['workers']
+
+    # 获取数据集路径
+    data_path = cfg.get('data')
+
+    # 自动递增保存目录
+    save_dir = get_save_dir(save_dir_base, name)
 
     # 创建数据加载器
     train_loader, val_loader, config = create_dataloaders(
-        config_path=config_path,
+        config_path=data_path,
         batch_size=batch_size,
         img_size=img_size,
-        workers=0
+        workers=workers
     )
 
     # 添加 Mosaic 增强到训练数据集
@@ -124,12 +135,13 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     nc = config.get('nc')  # 类别数量
 
     # 打印训练配置信息（包含 Mosaic 和 EMA）
+    device = sys_cfg['device']
     print_training_info(
-        config_path,
+        data_path,
         epochs,
         batch_size,
         img_size,
-        lr,
+        cfg['optimizer']['lr'],
         device,
         save_dir,
         num_train_samples=len(train_loader.dataset),
@@ -148,13 +160,13 @@ def train(model, config_path, epochs=100, batch_size=16, img_size=640,
     print_model_summary(model, img_size, nc=nc)
 
     # 创建优化器和调度器
-    optimizer = _create_optimizer(model, lr)
-    scheduler = _create_scheduler(optimizer, epochs)
+    optimizer = _create_optimizer(model, cfg)
+    scheduler = _create_scheduler(optimizer, cfg, epochs)
 
     # 创建 EMA
     ema = None
     if use_ema:
-        ema = ModelEMA(model, decay=0.9999)
+        ema = ModelEMA(model, decay=ema_decay)
 
     # 初始化日志记录器
     is_detection = hasattr(model, 'detect')
