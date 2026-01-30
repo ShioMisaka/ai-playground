@@ -45,7 +45,6 @@ from .model_summary import (
     print_training_setup,
     print_training_completion,
     print_mosaic_disabled,
-    print_plotting_status,
     get_model_summary,
     count_layers,
     estimate_flops,

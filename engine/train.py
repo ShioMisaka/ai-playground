@@ -14,7 +14,7 @@ from .training import train_one_epoch, print_metrics
 from .validate import validate
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
                    print_training_start_2x2, print_detection_header, get_save_dir,
-                   ModelEMA, print_training_completion, print_mosaic_disabled, print_plotting_status)
+                   ModelEMA, print_training_completion, print_mosaic_disabled)
 from utils.transforms import MosaicTransform
 
 
