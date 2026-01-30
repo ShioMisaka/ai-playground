@@ -78,7 +78,16 @@ def train_one_epoch(
 
     epoch_start_time = time.time()
 
-    for batch_idx, (imgs, targets, paths) in enumerate(dataloader):
+    for batch_idx, batch_data in enumerate(dataloader):
+        # 兼容新旧数据格式
+        if len(batch_data) == 4:
+            # 新格式：(imgs, targets, paths, letterbox_params_list)
+            imgs, targets, paths, letterbox_params_list = batch_data
+        else:
+            # 旧格式：(imgs, targets, paths)
+            imgs, targets, paths = batch_data
+            letterbox_params_list = None
+
         imgs = imgs.to(device)
         targets = targets.to(device)
 

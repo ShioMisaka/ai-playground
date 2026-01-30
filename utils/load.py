@@ -96,6 +96,8 @@ class YOLODataset(Dataset):
         img = np.array(img).astype(np.float32)
 
         # 预处理：letterbox 或简单 resize
+        letterbox_params = None  # 存储letterbox参数 (r, pad_w, pad_h)
+
         if self.letterbox:
             # 使用 letterbox
             import cv2
@@ -106,12 +108,17 @@ class YOLODataset(Dataset):
             # 缩放
             img = cv2.resize(img, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
 
-            # 填充
-            pad_h = (self.img_size - scaled_h) / 2
-            pad_w = (self.img_size - scaled_w) / 2
-            top, bottom = int(round(pad_h - 0.1)), int(round(pad_h + 0.1))
-            left, right = int(round(pad_w - 0.1)), int(round(pad_w + 0.1))
+            # 填充 - 确保最终尺寸精确为 img_size
+            pad_h = self.img_size - scaled_h
+            pad_w = self.img_size - scaled_w
+            # 上下左右均分填充
+            top, bottom = pad_h // 2, pad_h - pad_h // 2
+            left, right = pad_w // 2, pad_w - pad_w // 2
             img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+
+            # 存储 letterbox 参数用于损失函数中的坐标逆变换
+            # 格式: (scale_factor, pad_left, pad_top)
+            letterbox_params = (r, left, top)
 
             # 调整边界框坐标以匹配 letterbox 变换
             # 关键：letterbox 保持宽高比，所以使用统一的缩放因子 r
@@ -125,10 +132,10 @@ class YOLODataset(Dataset):
 
                 # 2. 调整中心点坐标（加上填充偏移）
                 # 归一化的偏移量 = pad / img_size
-                boxes[:, 1] += pad_w / self.img_size  # x_center
-                boxes[:, 2] += pad_h / self.img_size  # y_center
+                boxes[:, 1] += left / self.img_size  # x_center
+                boxes[:, 2] += top / self.img_size  # y_center
         else:
-            # 简单 resize
+            # 简单 resize - 不需要letterbox参数
             import cv2
             img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
@@ -138,7 +145,7 @@ class YOLODataset(Dataset):
         # HWC -> CHW
         img = torch.from_numpy(img).permute(2, 0, 1)
 
-        return img, boxes, str(self.img_files[idx])
+        return img, boxes, str(self.img_files[idx]), letterbox_params
 
 def load_yaml_config(yaml_path):
     """加载YAML配置文件"""
@@ -148,28 +155,53 @@ def load_yaml_config(yaml_path):
 
 
 def collate_fn(batch):
-    """自定义批处理函数，处理不同数量的边界框"""
-    imgs, boxes, paths = zip(*batch)
-    
+    """自定义批处理函数，处理不同数量的边界框和 letterbox 参数
+
+    Args:
+        batch: (img, boxes, path, letterbox_params) 元组列表
+
+    Returns:
+        imgs: 堆叠的图像张量
+        targets: 合并的目标张量 (N, 9) - [batch_idx, class_id, x, y, w, h, r, pad_w, pad_h]
+        paths: 图像路径列表
+        letterbox_params_list: 每个 sample 的 letterbox 参数列表
+    """
+    imgs, boxes, paths, letterbox_params_list = zip(*batch)
+
     # 堆叠图片
     imgs = torch.stack(imgs, 0)
-    
-    # 为每个标签添加batch索引
+
+    # 为每个标签添加batch索引和letterbox参数
     boxes_with_idx = []
-    for i, box in enumerate(boxes):
+    for i, (box, lb_params) in enumerate(zip(boxes, letterbox_params_list)):
         if box.shape[0] > 0:
             # 在第一列添加batch索引
             batch_idx = torch.full((box.shape[0], 1), i, dtype=torch.float32)
             box_with_idx = torch.cat([batch_idx, box], dim=1)
+
+            # 添加 letterbox 参数 (r, left, top) 到每个box
+            # 这样每行变成: [batch_idx, class_id, x, y, w, h, r, left, top]
+            if lb_params is not None:
+                r, left, top = lb_params
+                # 使用 expand 创建相同值的 tensor
+                lb_values = torch.tensor([[r, left, top]], dtype=torch.float32)
+                lb_tensor = lb_values.expand(box.shape[0], 3)
+                box_with_idx = torch.cat([box_with_idx, lb_tensor], dim=1)
+            else:
+                # 没有letterbox (使用简单resize)，用0填充
+                lb_tensor = torch.zeros((box.shape[0], 3), dtype=torch.float32)
+                box_with_idx = torch.cat([box_with_idx, lb_tensor], dim=1)
+
             boxes_with_idx.append(box_with_idx)
-    
+
     # 合并所有boxes
     if len(boxes_with_idx) > 0:
         targets = torch.cat(boxes_with_idx, 0)
     else:
-        targets = torch.zeros((0, 6), dtype=torch.float32)
-    
-    return imgs, targets, paths
+        # 空目标，格式：[batch_idx, class_id, x, y, w, h, r, pad_w, pad_h]
+        targets = torch.zeros((0, 9), dtype=torch.float32)
+
+    return imgs, targets, paths, list(letterbox_params_list)
 
 def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0, letterbox=True):
     """创建训练和验证数据加载器

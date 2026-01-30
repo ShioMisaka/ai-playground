@@ -22,6 +22,7 @@ cfg = get_config(
         'model.use_ema': True,
         'augment.use_mosaic': True,
         'augment.close_mosaic': 10,  # 最后10个epoch关闭mosaic（30个epoch训练时，在第21个epoch关闭）
+        'optimizer.type': 'Adam',
         'optimizer.lr': 0.001,
         'optimizer.weight_decay': 0.0005,
         'optimizer.momentum': 0.9,
