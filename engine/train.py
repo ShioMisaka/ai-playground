@@ -105,6 +105,7 @@ def train(model, cfg: dict, data_config=None):
     batch_size = train_cfg['batch_size']
     name = train_cfg['name']
     save_dir_base = train_cfg['save_dir']
+    letterbox = train_cfg.get('letterbox', True)  # 是否使用 letterbox 预处理
     img_size = model_cfg['img_size']
     use_ema = model_cfg['use_ema']
     ema_decay = model_cfg.get('ema_decay', 0.9999)
@@ -123,7 +124,8 @@ def train(model, cfg: dict, data_config=None):
         config_path=data_path,
         batch_size=batch_size,
         img_size=img_size,
-        workers=workers
+        workers=workers,
+        letterbox=letterbox  # 传递 letterbox 参数
     )
 
     # 添加 Mosaic 增强到训练数据集

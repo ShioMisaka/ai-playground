@@ -98,46 +98,68 @@ class YOLODataset(Dataset):
         # 预处理：letterbox 或简单 resize
         letterbox_params = None  # 存储letterbox参数 (r, pad_w, pad_h)
 
+        import cv2
+        img_h, img_w = img.shape[:2]
+
+        # 检测是否是 Mosaic 输出的图像（2*img_size × 2*img_size）
+        is_mosaic = (img_h == self.img_size * 2) and (img_w == self.img_size * 2)
+
         if self.letterbox:
-            # 使用 letterbox
-            import cv2
-            img_h, img_w = img.shape[:2]
-            r = min(self.img_size / img_h, self.img_size / img_w)
-            scaled_h, scaled_w = int(round(img_h * r)), int(round(img_w * r))
+            if is_mosaic:
+                # Mosaic 图像：从 2*img_size × 2*img_size resize 到 img_size × img_size
+                img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
-            # 缩放
-            img = cv2.resize(img, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
+                # Boxes 坐标需要缩放 0.5（因为图像尺寸缩小了一半）
+                if len(boxes) > 0:
+                    boxes[:, 1:] *= 0.5  # 所有坐标缩放 0.5
 
-            # 填充 - 确保最终尺寸精确为 img_size
-            pad_h = self.img_size - scaled_h
-            pad_w = self.img_size - scaled_w
-            # 上下左右均分填充
-            top, bottom = pad_h // 2, pad_h - pad_h // 2
-            left, right = pad_w // 2, pad_w - pad_w // 2
-            img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+                # Mosaic 不需要 letterbox 参数（没有填充偏移）
+                letterbox_params = None
+            else:
+                # 非 Mosaic 图像：使用标准 letterbox
+                r = min(self.img_size / img_h, self.img_size / img_w)
+                scaled_h, scaled_w = int(round(img_h * r)), int(round(img_w * r))
 
-            # 存储 letterbox 参数用于损失函数中的坐标逆变换
-            # 格式: (scale_factor, pad_left, pad_top)
-            letterbox_params = (r, left, top)
+                # 缩放
+                img = cv2.resize(img, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
 
-            # 调整边界框坐标以匹配 letterbox 变换
-            # 关键：letterbox 保持宽高比，所以使用统一的缩放因子 r
-            if len(boxes) > 0:
-                # Boxes 格式: [class_id, x_center, y_center, width, height] (归一化坐标)
-                # 1. 应用缩放因子 r
-                boxes[:, 1] *= r  # x_center
-                boxes[:, 2] *= r  # y_center
-                boxes[:, 3] *= r  # width
-                boxes[:, 4] *= r  # height
+                # 填充 - 确保最终尺寸精确为 img_size
+                pad_h = self.img_size - scaled_h
+                pad_w = self.img_size - scaled_w
+                # 上下左右均分填充
+                top, bottom = pad_h // 2, pad_h - pad_h // 2
+                left, right = pad_w // 2, pad_w - pad_w // 2
+                img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
 
-                # 2. 调整中心点坐标（加上填充偏移）
-                # 归一化的偏移量 = pad / img_size
-                boxes[:, 1] += left / self.img_size  # x_center
-                boxes[:, 2] += top / self.img_size  # y_center
+                # 存储 letterbox 参数
+                letterbox_params = (r, left, top)
+
+                # 调整边界框坐标以匹配 letterbox 变换
+                if len(boxes) > 0:
+                    # Boxes 格式: [class_id, x_center, y_center, width, height] (归一化坐标)
+                    # 1. 应用缩放因子 r
+                    boxes[:, 1] *= r  # x_center
+                    boxes[:, 2] *= r  # y_center
+                    boxes[:, 3] *= r  # width
+                    boxes[:, 4] *= r  # height
+
+                    # 2. 调整中心点坐标（加上填充偏移）
+                    # 归一化的偏移量 = pad / img_size
+                    boxes[:, 1] += left / self.img_size  # x_center
+                    boxes[:, 2] += top / self.img_size  # y_center
         else:
             # 简单 resize - 不需要letterbox参数
-            import cv2
             img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+
+            # 归一化坐标需要随图像尺寸缩放
+            # 坐标缩放因子 = old_size / new_size
+            if len(boxes) > 0:
+                scale_x = img_w / self.img_size  # x 方向缩放
+                scale_y = img_h / self.img_size  # y 方向缩放
+                boxes[:, 1] *= scale_x  # x_center
+                boxes[:, 2] *= scale_y  # y_center
+                boxes[:, 3] *= scale_x  # width
+                boxes[:, 4] *= scale_y  # height
 
         # 归一化
         img = img.astype(np.float32) / 255.0

@@ -228,17 +228,20 @@ class YOLOv11(nn.Module):
         p5 = self.c3k2_22(x)                # 22
 
         # ===== Detection Head =====
-        # detect.forward() 现在始终返回 (bs, n_anchors, 4+nc) 格式
-        predictions = self.detect([p3, p4, p5])
+        # detect.forward() 根据模式返回不同格式：
+        # - 训练模式: {'cls': cls_outputs, 'reg': reg_outputs}
+        # - 推理模式: (bs, n_anchors, 4+nc) 格式的预测张量
+        detect_output = self.detect([p3, p4, p5])
 
         # 如果提供了 targets，计算 loss
         if targets is not None:
-            # 从 detect 的属性获取中间值
-            cls_outputs = self.detect._cls_outputs
-            reg_outputs = self.detect._reg_outputs
+            # 训练模式：detect_output 是 {'cls': cls_outputs, 'reg': reg_outputs}
+            # 计算 loss 需要预测结果（用于后续 NMS）
+            # 需要临时调用 _decode_inference 获取预测
+            predictions = self.detect._decode_inference(detect_output['cls'], detect_output['reg'], [p3, p4, p5])
 
-            # 构建 loss 字典
-            loss_dict = {'cls': cls_outputs, 'reg': reg_outputs}
+            # 构建损失字典
+            loss_dict = detect_output  # {'cls': cls_outputs, 'reg': reg_outputs}
 
             # 计算损失
             loss_for_backward, loss_items = self.loss_fn(loss_dict, targets)
@@ -250,5 +253,5 @@ class YOLOv11(nn.Module):
                 'predictions': predictions
             }
 
-        # 推理模式：只返回预测
-        return predictions
+        # 推理模式：detect_output 已经是预测张量
+        return detect_output

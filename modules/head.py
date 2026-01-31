@@ -136,7 +136,8 @@ class DetectAnchorFree(nn.Module):
             x: list of 3 feature maps [P3, P4, P5]
 
         Returns:
-            predictions: (bs, n_anchors, 4+nc) 格式的预测张量
+            if training: {'cls': [(bs, nc, h, w), ...], 'reg': [(bs, 4, reg_max, h, w), ...]}
+            if inference: (bs, n_anchors, 4+nc) 格式的预测张量
         """
         cls_outputs = []
         reg_outputs = []
@@ -151,12 +152,12 @@ class DetectAnchorFree(nn.Module):
             reg_output = reg_output.reshape(-1, 4, self.reg_max, reg_output.shape[2], reg_output.shape[3])
             reg_outputs.append(reg_output)
 
-        # 保存用于 loss 计算的中间值（训练时需要）
-        self._cls_outputs = cls_outputs
-        self._reg_outputs = reg_outputs
+        if not self.training:
+            # 推理模式：解码预测
+            return self._decode_inference(cls_outputs, reg_outputs, x)
 
-        # 始终返回解码后的预测（统一格式）
-        return self._decode_inference(cls_outputs, reg_outputs, x)
+        # 训练模式：返回原始输出用于 loss 计算
+        return {'cls': cls_outputs, 'reg': reg_outputs}
 
     def _decode_inference(self, cls_outputs, reg_outputs, x):
         """解码预测为统一格式
