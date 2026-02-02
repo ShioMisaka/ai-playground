@@ -175,7 +175,22 @@ class DetectionTrainer:
 
     def _setup_logging(self):
         """Setup logging systems."""
-        raise NotImplementedError("Logging setup not yet implemented")
+        # CSV logger
+        csv_path = self.save_dir / 'results.csv'
+        self.csv_logger = TrainingLogger(
+            csv_path,
+            is_detection=True,
+        )
+
+        # Live table logger
+        self.live_logger = LiveTableLogger(
+            columns=[
+                "box_loss", "cls_loss", "dfl_loss",
+                "precision", "recall", "mAP50", "mAP50-95"
+            ],
+            total_epochs=self.train_cfg.get('epochs', 100),
+            console_width=self.train_cfg.get('console_width', 130),
+        )
 
     def train(self) -> Dict[str, Any]:
         """

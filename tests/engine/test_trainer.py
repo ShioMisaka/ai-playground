@@ -1,5 +1,7 @@
 """Tests for engine.trainer.DetectionTrainer"""
 import pytest
+import tempfile
+from pathlib import Path
 import torch
 from models import YOLOv11
 from engine.trainer import DetectionTrainer
@@ -140,3 +142,26 @@ def test_mosaic_setup():
     assert trainer.mosaic_enabled is True
     assert trainer.mosaic_prob == 0.9
     assert trainer.mosaic is None  # Will be set after data loaders are created
+
+
+def test_logging_setup():
+    """Test CSV and LiveTable logger initialization."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        model = YOLOv11(nc=2, scale='n')
+
+        config = {
+            'train': {
+                'name': 'test',
+                'epochs': 2,
+                'batch_size': 4,
+                'save_dir': tmpdir,
+            },
+            'data': {'train': 'dummy.txt', 'nc': 2},
+            'device': 'cpu',
+        }
+        trainer = DetectionTrainer(model, config)
+        trainer._setup_save_dir()
+        trainer._setup_logging()
+
+        assert trainer.csv_logger is not None
+        assert trainer.live_logger is not None
