@@ -137,16 +137,27 @@ class YOLODataset(Dataset):
                 # 调整边界框坐标以匹配 letterbox 变换
                 if len(boxes) > 0:
                     # Boxes 格式: [class_id, x_center, y_center, width, height] (归一化坐标)
-                    # 1. 应用缩放因子 r
-                    boxes[:, 1] *= r  # x_center
-                    boxes[:, 2] *= r  # y_center
-                    boxes[:, 3] *= r  # width
-                    boxes[:, 4] *= r  # height
+                    #
+                    # 正确的 letterbox 坐标变换：
+                    # 1. 归一化坐标 -> 原图像素坐标 (乘以原图尺寸)
+                    # 2. 应用 letterbox 缩放 (乘以 r)
+                    # 3. 加上填充偏移
+                    # 4. 归一化到 img_size
+                    #
+                    # 公式: coord_new = coord_norm * orig_dim * r / img_size + offset / img_size
 
-                    # 2. 调整中心点坐标（加上填充偏移）
+                    # 对于 x_center 和 width：使用原图宽度 img_w
+                    boxes[:, 1] = boxes[:, 1] * img_w * r / self.img_size  # x_center (缩放后)
+                    boxes[:, 3] = boxes[:, 3] * img_w * r / self.img_size  # width (缩放后)
+
+                    # 对于 y_center 和 height：使用原图高度 img_h
+                    boxes[:, 2] = boxes[:, 2] * img_h * r / self.img_size  # y_center (缩放后)
+                    boxes[:, 4] = boxes[:, 4] * img_h * r / self.img_size  # height (缩放后)
+
+                    # 调整中心点坐标（加上填充偏移）
                     # 归一化的偏移量 = pad / img_size
-                    boxes[:, 1] += left / self.img_size  # x_center
-                    boxes[:, 2] += top / self.img_size  # y_center
+                    boxes[:, 1] += left / self.img_size  # x_center 加上水平填充
+                    boxes[:, 2] += top / self.img_size   # y_center 加上垂直填充
         else:
             # 简单 resize - 不需要letterbox参数
             img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)

@@ -13,7 +13,7 @@ cfg = get_config(
         'train.name': 'test_exp',
         'train.epochs': 30,
         'train.batch_size': 8,
-        'train.letterbox': False,  # 训练时使用简单 resize（不使用 letterbox）
+        'train.letterbox': True,
         'train.save_dir': 'runs/train',
         'model.nc': 2,  # 类别数
         'model.scale': 'n',  # 模型规模
@@ -38,6 +38,4 @@ cfg = get_config(
 model = YOLOv11(nc=2, scale='n')
 
 # 3. 开始训练
-print("开始训练...")
 trained_model = train(model, cfg)
-print("训练完成！")
