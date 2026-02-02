@@ -439,17 +439,81 @@ class YOLO:
         if 'name' not in final_config['train']:
             final_config['train']['name'] = 'exp'
 
-        # 创建训练器并训练
+        # 创建训练器
         trainer = DetectionTrainer(
             model=self.model,
             config=final_config,
             save_dir=save_dir
         )
 
+        # 打印训练开始信息（模型摘要 + 配置信息）
+        from utils.model_summary import print_training_start_2x2
+
+        train_cfg = final_config.get('train', {})
+        data_cfg = final_config.get('data', {})
+        optimizer_cfg = final_config.get('optimizer', {})
+        model_cfg = final_config.get('model', {})
+
+        # 提取参数
+        data_path = data_cfg.get('train', data_cfg.get('path', 'unknown'))
+        epochs = train_cfg.get('epochs', 100)
+        batch_size = train_cfg.get('batch_size', 16)
+        img_size = train_cfg.get('img_size', 640)
+        lr = optimizer_cfg.get('lr', 0.001)
+        device_str = str(self.device)
+        # 从配置获取保存目录
+        save_dir_base = train_cfg.get('save_dir', 'runs/train')
+        exp_name = train_cfg.get('name', 'exp')
+        save_dir_str = Path(save_dir_base) / exp_name
+
+        # EMA 和 Mosaic 配置
+        use_ema = model_cfg.get('use_ema', True)
+        use_mosaic = train_cfg.get('mosaic', True)
+        close_mosaic = train_cfg.get('mosaic_disable_epoch', None) if use_mosaic else None
+        nc = self.nc
+
+        # 获取数据集样本数（从 data_config）
+        num_train_samples = None
+        num_val_samples = None
+        if 'train' in data_cfg and data_cfg['train']:
+            try:
+                from utils.load import create_dataloaders
+                train_loader, val_loader = create_dataloaders(
+                    data_path=data_path,
+                    val_path=data_cfg.get('val', data_path),
+                    batch_size=batch_size,
+                    img_size=img_size,
+                    letterbox=train_cfg.get('letterbox', True),
+                    nc=nc,
+                )
+                num_train_samples = len(train_loader.dataset)
+                num_val_samples = len(val_loader.dataset)
+            except Exception:
+                pass  # 如果无法获取样本数，使用默认值（None）
+
+        # 打印 2x2 布局信息面板
+        print_training_start_2x2(
+            config_path=data_path,
+            epochs=epochs,
+            batch_size=batch_size,
+            img_size=img_size,
+            lr=lr,
+            device=device_str,
+            save_dir=save_dir_str,
+            model=self.model,
+            num_train_samples=num_train_samples,
+            num_val_samples=num_val_samples,
+            nc=nc,
+            use_mosaic=use_mosaic,
+            use_ema=use_ema,
+            close_mosaic=close_mosaic,
+        )
+
         results = trainer.train()
 
         # 加载最佳权重回模型（状态同步）
         best_weights_path = Path(results['save_dir']) / 'weights' / 'best.pt'
+        best_loss = None
         if best_weights_path.exists():
             checkpoint = torch.load(
                 best_weights_path,
@@ -458,11 +522,24 @@ class YOLO:
             )
             if isinstance(checkpoint, dict):
                 state_dict = checkpoint.get('model_state_dict', checkpoint)
+                best_loss = checkpoint.get('best_loss', None)
             else:
                 state_dict = checkpoint
 
             self.model.load_state_dict(state_dict, strict=False)
             print(f"已加载最佳权重到模型: {best_weights_path}")
+
+        # 打印训练完成信息和绘制训练曲线
+        from utils.model_summary import print_training_completion
+        from utils.curves import plot_training_curves
+
+        save_dir_path = Path(results['save_dir'])
+        csv_path = save_dir_path / 'results.csv'
+
+        # 只有在 CSV 文件实际存在时才打印和绘图（处理测试/模拟环境）
+        if csv_path.exists():
+            print_training_completion(save_dir_path, csv_path, best_loss)
+            plot_training_curves(str(csv_path), save_dir=str(save_dir_path))
 
         return results
 
