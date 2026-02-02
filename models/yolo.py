@@ -305,7 +305,8 @@ class YOLO:
         imgsz: Optional[int] = None,
         lr: Optional[float] = None,
         device: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
+        cfg_path: Optional[str] = None,
+        config: Optional[Union[str, Path, Dict[str, Any]]] = None,
         save_dir: Optional[Union[str, Path]] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -318,9 +319,10 @@ class YOLO:
             imgsz: 图像尺寸
             lr: 学习率
             device: 设备 ('cpu', 'cuda', 'cuda:0', etc.)
-            config: 完整配置字典（如果提供，将忽略其他参数）
+            cfg_path: 用户自定义配置文件路径 (YAML)，与 config 参数功能相同
+            config: 配置文件路径 (YAML) 或配置字典
             save_dir: 保存目录
-            **kwargs: 其他训练参数
+            **kwargs: 其他训练参数（支持点号命名，如 optimizer.weight_decay=0.0005）
 
         Returns:
             Dict[str, Any]: 训练结果，包含:
@@ -328,110 +330,118 @@ class YOLO:
                 - final_epoch: 最终轮数
                 - save_dir: 保存目录
 
+        配置优先级（从低到高）:
+            1. configs/default.yaml
+            2. cfg_path / config 参数（YAML 文件）
+            3. data 参数（YAML 文件）
+            4. 直接参数（epochs, batch, lr 等）
+            5. **kwargs
+
         Example:
+            >>> # 方式1: 使用直接参数
+            >>> model = YOLO('configs/models/yolov11n.yaml')
+            >>> results = model.train(data='coco8.yaml', epochs=100, batch=16)
+
+            >>> # 方式2: 使用 cfg_path 指定配置文件
+            >>> model = YOLO('configs/models/yolov11n.yaml')
+            >>> results = model.train(cfg_path='my_config.yaml', epochs=200)
+
+            >>> # 方式3: 使用 config 参数（与 cfg_path 功能相同）
             >>> model = YOLO('configs/models/yolov11n.yaml')
             >>> results = model.train(
-            ...     data='configs/data/coco8.yaml',
-            ...     epochs=100,
-            ...     batch=16,
-            ...     imgsz=640
+            ...     cfg_path='my_config.yaml',
+            ...     data='coco8.yaml',
+            ...     lr=0.0001  # 覆盖配置文件中的学习率
             ... )
-            >>> print(f"Best mAP: {results['best_map']}")
         """
         from models.yolov11 import YOLOv11
+        from utils.config import merge_training_config, load_yaml
 
-        # Validate data parameter
-        if data is None and (config is None or 'data' not in config):
-            raise ValueError(
-                "Data parameter is required. "
-                "Provide either 'data' argument or include 'data' in config."
-            )
+        # 处理用户配置文件（cfg_path 优先级高于 config）
+        user_config = None
 
-        # 如果提供了完整配置，直接使用
-        if config is not None:
-            final_config = config
-            # 确保 data 配置正确
-            if data is not None and 'data' in final_config:
-                if isinstance(data, (str, Path)):
-                    final_config['data']['train'] = str(data)
-        else:
-            # 从参数构建配置
-            overrides = {}
-
-            # 将参数转换为嵌套配置
-            if epochs is not None:
-                overrides['train.epochs'] = epochs
-            if batch is not None:
-                overrides['train.batch_size'] = batch
-            if imgsz is not None:
-                overrides['train.img_size'] = imgsz
-            if device is not None:
-                overrides['device'] = device
-            if lr is not None:
-                overrides['optimizer.lr'] = lr
-            if save_dir is not None:
-                overrides['train.save_dir'] = str(save_dir)
-
-            # 添加其他 kwargs
-            for key, value in kwargs.items():
-                # 将下划线命名转换为点号命名
-                config_key = key.replace('__', '.').replace('_', '.')
-                overrides[config_key] = value
-
-            # 加载模型配置
-            if hasattr(self, 'model_config'):
-                model_config = self.model_config
+        # 优先使用 cfg_path
+        if cfg_path is not None:
+            config_path = Path(cfg_path)
+            if not config_path.exists():
+                raise FileNotFoundError(f"配置文件不存在: {config_path}")
+            user_config = load_yaml(str(config_path))
+        # 其次使用 config 参数
+        elif config is not None:
+            if isinstance(config, (str, Path)):
+                # 从 YAML 文件加载配置
+                config_path = Path(config)
+                if not config_path.exists():
+                    raise FileNotFoundError(f"配置文件不存在: {config_path}")
+                user_config = load_yaml(str(config_path))
             else:
-                # 如果从权重加载，创建基础模型配置
-                model_config = {
-                    'model': {
-                        'nc': self.nc,
-                        'scale': getattr(self, 'scale', 'n')
-                    }
+                # config 是字典
+                user_config = config
+
+        # 处理 data 参数（YAML 文件）
+        data_config = None
+        original_data_yaml_path = None  # 保存原始 YAML 文件路径
+        if data is not None:
+            data_path = Path(data)
+            if data_path.suffix in ['.yaml', '.yml']:
+                original_data_yaml_path = str(data_path)
+                data_yaml = load_yaml(original_data_yaml_path)
+                # 构建数据配置结构，保存原始 YAML 路径
+                data_config = {'data': data_yaml}
+                data_config['data']['_yaml_path'] = original_data_yaml_path
+
+        # 构建覆盖配置（直接参数优先级最高）
+        overrides = {}
+
+        # 将直接参数转换为嵌套配置
+        if epochs is not None:
+            overrides['train.epochs'] = epochs
+        if batch is not None:
+            overrides['train.batch_size'] = batch
+        if imgsz is not None:
+            overrides['train.img_size'] = imgsz
+        if device is not None:
+            overrides['device'] = device
+        if lr is not None:
+            overrides['optimizer.lr'] = lr
+        if save_dir is not None:
+            overrides['train.save_dir'] = str(save_dir)
+
+        # 处理 kwargs（支持点号命名，如 optimizer.weight_decay=0.0005）
+        for key, value in kwargs.items():
+            config_key = key.replace('__', '.').replace('_', '.')
+            overrides[config_key] = value
+
+        # 合并配置：优先级 default < user_config < data_config < overrides
+        # 首先获取模型配置
+        if hasattr(self, 'model_config'):
+            model_config = self.model_config
+        else:
+            # 如果从权重加载，创建基础模型配置
+            model_config = {
+                'model': {
+                    'nc': self.nc,
+                    'scale': getattr(self, 'scale', 'n')
                 }
+            }
 
-            # 加载数据配置
-            data_config = {}
-            if data is not None:
-                data_path = Path(data)
-                if data_path.suffix in ['.yaml', '.yml']:
-                    # 从 YAML 文件加载数据配置
-                    data_yaml = load_yaml(str(data_path))
+        # 使用 merge_training_config 合并所有配置源
+        final_config = merge_training_config(
+            model_config=model_config,
+            user_config=user_config,
+            overrides=overrides
+        )
 
-                    # 构建数据配置
-                    data_config = {
-                        'data': {
-                            'train': str(data_path),
-                            'nc': data_yaml.get('nc', self.nc),
-                        }
-                    }
+        # 如果提供了 data_config，合并数据配置（优先级高于 model_config）
+        if data_config is not None:
+            from utils.config import merge_configs
+            final_config = merge_configs(final_config, data_config)
 
-                    # 更新模型的类别数量
-                    if 'nc' in data_yaml:
-                        new_nc = data_yaml['nc']
-                        if new_nc != self.nc:
-                            print(f"更新类别数量: {self.nc} -> {new_nc}")
-                            # 重新创建模型
-                            self.model = YOLOv11(nc=new_nc, scale=getattr(self, 'scale', 'n'))
-                            self.model.to(self.device)
-                            self._nc = new_nc
-
-                            # 更新类别名称
-                            if 'names' in data_yaml:
-                                names = data_yaml['names']
-                                if isinstance(names, dict):
-                                    self.names = {int(k): v for k, v in names.items()}
-                                elif isinstance(names, list):
-                                    self.names = {i: name for i, name in enumerate(names)}
-                else:
-                    data_config = {'data': {'train': str(data_path)}}
-
-            # 合并配置
-            final_config = merge_training_config(
-                model_config=model_config,
-                user_config=data_config,
-                overrides=overrides if overrides else None
-            )
+        # 验证数据配置是否存在
+        data_cfg = final_config.get('data', {})
+        data_path = data_cfg.get('train', data_cfg.get('path', None))
+        if not data_path:
+            raise ValueError("Data parameter is required. Please provide a data configuration file via the 'data' parameter.")
 
         # 确保 train.name 存在
         if 'train' not in final_config:
@@ -467,7 +477,7 @@ class YOLO:
         save_dir_str = Path(save_dir_base) / exp_name
 
         # EMA 和 Mosaic 配置
-        use_ema = model_cfg.get('use_ema', True)
+        use_ema = train_cfg.get('use_ema', True)
         use_mosaic = train_cfg.get('mosaic', True)
         close_mosaic = train_cfg.get('mosaic_disable_epoch', None) if use_mosaic else None
         nc = self.nc

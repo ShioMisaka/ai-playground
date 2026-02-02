@@ -133,9 +133,11 @@ def test_yolo_train_creates_correct_config():
     model = YOLO('configs/models/yolov11n.yaml')
 
     # Mock both the trainer and load_yaml to avoid actual file operations
+    # Note: load_yaml is called in train() method from utils.config
     with patch('models.yolo.DetectionTrainer') as mock_trainer_class, \
-         patch('models.yolo.load_yaml') as mock_load_yaml:
-        mock_load_yaml.return_value = {'nc': 2, 'names': ['cat', 'dog']}
+         patch('utils.config.load_yaml') as mock_load_yaml:
+        # Mock load_yaml to return minimal data config with 'train' path
+        mock_load_yaml.return_value = {'nc': 2, 'names': ['cat', 'dog'], 'train': 'dummy_data.yaml'}
 
         mock_trainer = Mock()
         mock_trainer.train.return_value = {

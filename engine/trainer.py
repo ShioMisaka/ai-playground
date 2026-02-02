@@ -23,6 +23,7 @@ from utils import (
     TrainingLogger,
     LiveTableLogger,
     ModelEMA,
+    print_mosaic_disabled,
 )
 from utils.transforms import MosaicTransform
 from engine.training import train_one_epoch
@@ -91,7 +92,8 @@ class DetectionTrainer:
     def _setup_data_loaders(self):
         """Setup training and validation data loaders."""
         # Extract data config path (YAML file)
-        data_path = self.data_cfg.get('train')
+        # 优先使用 _yaml_path（原始 YAML 文件路径），否则使用 train 键
+        data_path = self.data_cfg.get('_yaml_path', self.data_cfg.get('train'))
 
         self.train_loader, self.val_loader, _ = create_dataloaders(
             config_path=data_path,
@@ -211,9 +213,6 @@ class DetectionTrainer:
         img_size = self.train_cfg.get('img_size', 640)
         mosaic_disable_epoch = self.train_cfg.get('mosaic_disable_epoch', None)
 
-        print(f"Starting training for {epochs} epochs...")
-        print(f"Save directory: {self.save_dir}")
-
         try:
             epoch = 0
             for epoch in range(epochs):
@@ -226,6 +225,7 @@ class DetectionTrainer:
                 if mosaic_disable_epoch and epoch >= epochs - mosaic_disable_epoch:
                     if self.mosaic is not None:
                         self.mosaic.enable = False
+                        print_mosaic_disabled(epoch + 1)
 
                 # Training
                 train_metrics = train_one_epoch(
@@ -284,7 +284,7 @@ class DetectionTrainer:
                 self._save_checkpoint(epoch + 1, is_best=is_best)
 
         except KeyboardInterrupt:
-            print("\nTraining interrupted by user. Saving checkpoint...")
+            self.live_logger._console.print("\n\n[yellow]训练被用户中断 (KeyboardInterrupt)[/yellow]")
             self._save_checkpoint(epoch, is_best=False)
 
         finally:

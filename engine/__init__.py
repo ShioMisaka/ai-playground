@@ -22,8 +22,9 @@ from .classifier import (train_one_epoch as train_one_epoch_cls,
 from .detector import (train_one_epoch as train_one_epoch_det,
                        validate as validate_det, train_detector)
 
-# 统一训练器
-from .trainer import DetectionTrainer
+# 统一训练器 (DetectionTrainer)
+# Note: Import directly from engine.trainer to avoid circular import
+# from .trainer import DetectionTrainer
 
 # 可视化模块
 from .visualize import (
@@ -76,8 +77,7 @@ __all__ = [
     'train_classifier',
     'train_detector',
 
-    # 统一训练器
-    'DetectionTrainer',
+    # 统一训练器 (DetectionTrainer) - import directly from engine.trainer
 
     # 可视化 - 基础工具
     'enhance_contrast',
