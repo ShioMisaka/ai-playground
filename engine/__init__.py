@@ -9,8 +9,8 @@ from .training import train_one_epoch, print_metrics
 # 验证和测试
 from .validate import evaluate, test, validate
 
-# 预测接口
-from .predict import YOLO, LetterBox, Results, Boxes
+# 预测接口（YOLO 类已移至 models/yolo.py）
+from .predict import LetterBox, Results, Boxes
 
 # 分类和检测专用训练
 from .classifier import (train_one_epoch as train_one_epoch_cls,
@@ -63,8 +63,7 @@ __all__ = [
     'evaluate',
     'test',
 
-    # 预测接口
-    'YOLO',
+    # 预测接口（YOLO 类已移至 models/yolo.py）
     'LetterBox',
     'Results',
     'Boxes',
