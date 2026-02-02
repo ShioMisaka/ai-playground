@@ -87,17 +87,15 @@ class DetectionTrainer:
 
     def _setup_data_loaders(self):
         """Setup training and validation data loaders."""
-        # Extract data config
+        # Extract data config path (YAML file)
         data_path = self.data_cfg.get('train')
-        val_path = self.data_cfg.get('val', data_path)
 
-        self.train_loader, self.val_loader = create_dataloaders(
-            data_path=data_path,
-            val_path=val_path,
+        self.train_loader, self.val_loader, _ = create_dataloaders(
+            config_path=data_path,
             batch_size=self.train_cfg.get('batch_size', 16),
             img_size=self.train_cfg.get('img_size', 640),
+            workers=0,
             letterbox=self.train_cfg.get('letterbox', True),
-            nc=self.data_cfg.get('nc', 80),
         )
 
     def _setup_model(self):
@@ -200,8 +198,128 @@ class DetectionTrainer:
         Returns:
             Dict containing training results (best_map, final_loss, etc.)
         """
-        raise NotImplementedError("Training loop not yet implemented")
+        import time
+        from utils.curves import plot_training_curves
+
+        self.setup()
+
+        epochs = self.train_cfg.get('epochs', 100)
+        nc = self.data_cfg.get('nc', 80)
+        img_size = self.train_cfg.get('img_size', 640)
+        mosaic_disable_epoch = self.train_cfg.get('mosaic_disable_epoch', None)
+
+        print(f"Starting training for {epochs} epochs...")
+        print(f"Save directory: {self.save_dir}")
+
+        try:
+            for epoch in range(epochs):
+                epoch_start = time.time()
+                lr = self.optimizer.param_groups[0]['lr']
+
+                self.live_logger.start_epoch(epoch + 1, lr)
+
+                # Disable Mosaic in final epochs
+                if mosaic_disable_epoch and epoch >= epochs - mosaic_disable_epoch:
+                    if self.mosaic is not None:
+                        self.mosaic.enable = False
+
+                # Training
+                train_metrics = train_one_epoch(
+                    model=self.model,
+                    dataloader=self.train_loader,
+                    optimizer=self.optimizer,
+                    device=self.device,
+                    epoch=epoch + 1,
+                    total_epochs=epochs,
+                    nc=nc,
+                    live_logger=self.live_logger,
+                )
+
+                # Update EMA
+                if self.ema is not None:
+                    self.ema.update(self.model)
+
+                # Validation
+                val_model = self.ema.ema if self.ema else self.model
+                # Switch detect head to training mode for loss computation
+                if hasattr(val_model, 'detect'):
+                    val_model.detect.train()
+
+                val_metrics = validate(
+                    val_model,
+                    self.val_loader,
+                    self.device,
+                    nc=nc,
+                    img_size=img_size,
+                )
+
+                # Restore detect head mode
+                if hasattr(val_model, 'detect'):
+                    val_model.detect.eval()
+
+                # Update loggers
+                self.live_logger.update_row("train", train_metrics)
+                self.live_logger.update_row("val", val_metrics)
+
+                epoch_time = time.time() - epoch_start
+                self.live_logger.end_epoch(epoch_time)
+
+                self.csv_logger.write_epoch(
+                    epoch + 1, epoch_time, lr, train_metrics, val_metrics
+                )
+
+                # Step scheduler
+                self.scheduler.step()
+
+                # Save checkpoint
+                current_map = val_metrics.get('map50', 0.0)
+                is_best = current_map > self.best_map
+                if is_best:
+                    self.best_map = current_map
+
+                self._save_checkpoint(epoch + 1, is_best=is_best)
+
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user. Saving checkpoint...")
+            self._save_checkpoint(epoch, is_best=False)
+
+        finally:
+            self.live_logger.stop()
+            self.csv_logger.close()
+
+        # Plot training curves
+        csv_path = self.save_dir / 'results.csv'
+        plot_training_curves(str(csv_path), save_dir=str(self.save_dir))
+
+        print(f"\nTraining complete. Best mAP50: {self.best_map:.4f}")
+
+        return {
+            'best_map': self.best_map,
+            'final_epoch': epochs,
+            'save_dir': str(self.save_dir),
+        }
 
     def _save_checkpoint(self, epoch: int, is_best: bool = False):
         """Save model checkpoint."""
-        raise NotImplementedError("Checkpoint saving not yet implemented")
+        # Save last checkpoint
+        last_path = self.save_dir / 'weights' / 'last.pt'
+        last_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ckpt = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'best_map': self.best_map,
+        }
+
+        if self.ema is not None:
+            ckpt['ema_state_dict'] = self.ema.ema.state_dict()
+
+        torch.save(ckpt, last_path)
+
+        # Save best checkpoint
+        if is_best:
+            best_path = self.save_dir / 'weights' / 'best.pt'
+            torch.save(ckpt, best_path)
+            print(f"New best model saved with mAP50: {self.best_map:.4f}")
