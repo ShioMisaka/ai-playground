@@ -165,3 +165,13 @@ def test_logging_setup():
 
         assert trainer.csv_logger is not None
         assert trainer.live_logger is not None
+
+        # Verify CSV logger is opened (writer should be initialized)
+        assert trainer.csv_logger._writer is not None, "CSV logger should be opened"
+        assert trainer.csv_logger._file is not None, "CSV file should be open"
+
+        # Verify total_loss column is included in LiveTableLogger
+        assert "total_loss" in trainer.live_logger.columns, "total_loss should be in columns"
+
+        # Close the CSV logger to release the file
+        trainer.csv_logger.close()

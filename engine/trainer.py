@@ -181,11 +181,12 @@ class DetectionTrainer:
             csv_path,
             is_detection=True,
         )
+        self.csv_logger.open()
 
         # Live table logger
         self.live_logger = LiveTableLogger(
             columns=[
-                "box_loss", "cls_loss", "dfl_loss",
+                "total_loss", "box_loss", "cls_loss", "dfl_loss",
                 "precision", "recall", "mAP50", "mAP50-95"
             ],
             total_epochs=self.train_cfg.get('epochs', 100),
