@@ -212,6 +212,7 @@ class DetectionTrainer:
         print(f"Save directory: {self.save_dir}")
 
         try:
+            epoch = 0
             for epoch in range(epochs):
                 epoch_start = time.time()
                 lr = self.optimizer.param_groups[0]['lr']
@@ -272,7 +273,7 @@ class DetectionTrainer:
                 self.scheduler.step()
 
                 # Save checkpoint
-                current_map = val_metrics.get('map50', 0.0)
+                current_map = val_metrics.get('mAP50', 0.0)
                 is_best = current_map > self.best_map
                 if is_best:
                     self.best_map = current_map
@@ -295,7 +296,7 @@ class DetectionTrainer:
 
         return {
             'best_map': self.best_map,
-            'final_epoch': epochs,
+            'final_epoch': epoch + 1,
             'save_dir': str(self.save_dir),
         }
 
