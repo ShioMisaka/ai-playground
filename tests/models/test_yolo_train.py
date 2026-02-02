@@ -132,8 +132,11 @@ def test_yolo_train_creates_correct_config():
 
     model = YOLO('configs/models/yolov11n.yaml')
 
-    # Mock the trainer to avoid actual training
-    with patch('models.yolo.DetectionTrainer') as mock_trainer_class:
+    # Mock both the trainer and load_yaml to avoid actual file operations
+    with patch('models.yolo.DetectionTrainer') as mock_trainer_class, \
+         patch('models.yolo.load_yaml') as mock_load_yaml:
+        mock_load_yaml.return_value = {'nc': 2, 'names': ['cat', 'dog']}
+
         mock_trainer = Mock()
         mock_trainer.train.return_value = {
             'best_map': 0.85,
@@ -142,8 +145,9 @@ def test_yolo_train_creates_correct_config():
         }
         mock_trainer_class.return_value = mock_trainer
 
-        # Call train with parameters
+        # Call train with parameters (data is now required)
         results = model.train(
+            data='dummy_data.yaml',  # data parameter is now required
             epochs=10,
             batch=8,
             imgsz=320,

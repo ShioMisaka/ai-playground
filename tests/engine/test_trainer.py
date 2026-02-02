@@ -175,3 +175,46 @@ def test_logging_setup():
 
         # Close the CSV logger to release the file
         trainer.csv_logger.close()
+
+
+def test_trainer_with_empty_config():
+    """Test trainer handles missing config gracefully."""
+    model = YOLOv11(nc=2, scale='n')
+    config = {}
+
+    trainer = DetectionTrainer(model, config)
+
+    # Should use empty defaults
+    assert trainer.train_cfg == {}
+    assert trainer.data_cfg == {}
+    assert trainer.optimizer_cfg == {}
+    assert trainer.scheduler_cfg == {}
+
+
+def test_trainer_setup_error_handling():
+    """Test trainer setup wraps errors in RuntimeError."""
+    model = YOLOv11(nc=2, scale='n')
+
+    # Config with missing data path will fail during setup
+    config = {
+        'train': {'name': 'test', 'epochs': 1, 'batch_size': 4},
+        'data': {'train': 'nonexistent_file.txt'},  # This will cause failure
+        'device': 'cpu',
+    }
+
+    trainer = DetectionTrainer(model, config)
+
+    # Should raise RuntimeError wrapping the original error
+    with pytest.raises(RuntimeError, match="Failed to setup trainer"):
+        trainer.setup()
+
+
+def test_yolo_train_without_data():
+    """Test YOLO.train() handles missing data parameter."""
+    from models import YOLO
+
+    model = YOLO('configs/models/yolov11n.yaml')
+
+    # Should raise helpful error
+    with pytest.raises(ValueError, match="Data parameter is required"):
+        model.train(epochs=1)

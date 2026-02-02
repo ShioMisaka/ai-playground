@@ -70,14 +70,17 @@ class DetectionTrainer:
 
     def setup(self):
         """Setup all training components."""
-        self._setup_save_dir()
-        self._setup_data_loaders()
-        self._setup_model()
-        self._setup_optimizer()
-        self._setup_scheduler()
-        self._setup_ema()
-        self._setup_mosaic()
-        self._setup_logging()
+        try:
+            self._setup_save_dir()
+            self._setup_data_loaders()
+            self._setup_model()
+            self._setup_optimizer()
+            self._setup_scheduler()
+            self._setup_ema()
+            self._setup_mosaic()
+            self._setup_logging()
+        except Exception as e:
+            raise RuntimeError(f"Failed to setup trainer: {e}") from e
 
     def _setup_save_dir(self):
         """Setup save directory with auto-increment."""

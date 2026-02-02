@@ -340,6 +340,13 @@ class YOLO:
         """
         from models.yolov11 import YOLOv11
 
+        # Validate data parameter
+        if data is None and (config is None or 'data' not in config):
+            raise ValueError(
+                "Data parameter is required. "
+                "Provide either 'data' argument or include 'data' in config."
+            )
+
         # 如果提供了完整配置，直接使用
         if config is not None:
             final_config = config
