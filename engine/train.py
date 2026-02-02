@@ -13,11 +13,15 @@ from rich.console import Console
 from .training import train_one_epoch, print_metrics
 from .validate import validate
 
-# 直接从子模块导入，避免循环导入
+# Direct imports to avoid circular import issues
 from utils.load import create_dataloaders
 from utils.logger import TrainingLogger, LiveTableLogger
 from utils.curves import plot_training_curves
-from utils.model_summary import print_training_start_2x2, print_training_completion, print_mosaic_disabled
+from utils.model_summary import (
+    print_training_start_2x2,
+    print_training_completion,
+    print_mosaic_disabled
+)
 from utils.table import print_detection_header
 from utils.path_helper import get_save_dir
 from utils.ema import ModelEMA
