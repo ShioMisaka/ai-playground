@@ -106,11 +106,46 @@ class DetectionTrainer:
 
     def _setup_optimizer(self):
         """Setup optimizer."""
-        raise NotImplementedError("Optimizer setup not yet implemented")
+        optim_type = self.optimizer_cfg.get('type', 'Adam')
+        lr = self.optimizer_cfg.get('lr', 0.001)
+        weight_decay = self.optimizer_cfg.get('weight_decay', 0.0)
+
+        # Get trainable parameters
+        pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
+        for k, v in self.model.named_modules():
+            if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
+                pg2.append(v.bias)  # biases
+            if isinstance(v, nn.BatchNorm2d):
+                pg0.append(v.weight)  # no decay
+            elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
+                pg1.append(v.weight)  # apply decay
+
+        optimizer_cls = getattr(torch.optim, optim_type, torch.optim.Adam)
+        self.optimizer = optimizer_cls(
+            pg0 + pg1 + pg2,
+            lr=lr,
+            weight_decay=weight_decay,
+        )
 
     def _setup_scheduler(self):
         """Setup learning rate scheduler."""
-        raise NotImplementedError("Scheduler setup not yet implemented")
+        scheduler_type = self.scheduler_cfg.get('type', 'CosineAnnealingLR')
+        epochs = self.train_cfg.get('epochs', 100)
+        min_lr = self.scheduler_cfg.get('min_lr', 1e-6)
+
+        if scheduler_type == 'CosineAnnealingLR':
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=epochs,
+                eta_min=min_lr,
+            )
+        else:
+            # Default to CosineAnnealingLR
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=epochs,
+                eta_min=min_lr,
+            )
 
     def _setup_ema(self):
         """Setup EMA."""
