@@ -67,6 +67,112 @@ def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, A
     return result
 
 
+def merge_training_config(
+    model_config: Optional[Union[str, Dict[str, Any]]] = None,
+    user_config: Optional[Union[str, Dict[str, Any]]] = None,
+    overrides: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Merge training configurations from multiple sources with proper priority handling.
+
+    This function loads and merges configurations in the following priority order
+    (from lowest to highest priority):
+
+    1. **Default config** (configs/default.yaml) - Base configuration with defaults
+    2. **Model config** (file path or dict) - Model-specific settings (architecture, etc.)
+    3. **User config** (file path or dict) - User-defined training parameters
+    4. **Overrides dict** (from kwargs) - Highest priority for CLI/programmatic overrides
+
+    The merging is deep-recursive for nested dictionaries, meaning that nested values
+    are merged rather than replaced entirely.
+
+    Args:
+        model_config: Model configuration as either:
+            - File path (str) to a YAML file containing model config
+            - Dictionary with model configuration keys
+            - None to skip model config merging
+        user_config: User configuration as either:
+            - File path (str) to a YAML file containing user config
+            - Dictionary with user configuration keys
+            - None to skip user config merging
+        overrides: Override dictionary with highest priority.
+            Supports flat keys with dot notation (e.g., {'train.epochs': 100})
+            which are automatically converted to nested structure.
+            Can also contain nested dictionaries directly.
+            None to skip overrides.
+
+    Returns:
+        Dict[str, Any]: Merged configuration dictionary with all sources combined
+        according to the priority order.
+
+    Raises:
+        FileNotFoundError: If model_config or user_config is a file path that
+            does not exist.
+        yaml.YAMLError: If any YAML file cannot be parsed properly.
+
+    Examples:
+        Load only default config:
+        >>> config = merge_training_config()
+
+        Merge with model config from file:
+        >>> config = merge_training_config(
+        ...     model_config='configs/models/yolov11n.yaml'
+        ... )
+
+        Merge with model and user configs:
+        >>> config = merge_training_config(
+        ...     model_config={'model': {'nc': 2, 'scale': 'n'}},
+        ...     user_config={'train': {'epochs': 200, 'batch_size': 32}}
+        ... )
+
+        Use CLI-style overrides with flat keys:
+        >>> config = merge_training_config(
+        ...     overrides={'train.epochs': 100, 'optimizer.lr': 0.001}
+        ... )
+
+        Combine all sources:
+        >>> config = merge_training_config(
+        ...     model_config='configs/models/yolov11n.yaml',
+        ...     user_config='configs/experiments/my_exp.yaml',
+        ...     overrides={'device': 'cpu', 'train.epochs': 50}
+        ... )
+
+        Note: In the last example, if all configs specify 'train.epochs':
+        - Default: 100
+        - Model config: 150
+        - User config: 200
+        - Overrides: 50
+        The final value will be 50 (overrides have highest priority).
+    """
+    # Load default config
+    default_config_path = Path(__file__).parent.parent / 'configs' / 'default.yaml'
+    cfg = load_yaml(str(default_config_path))
+
+    # Merge model config
+    if model_config is not None:
+        if isinstance(model_config, str):
+            model_cfg = load_yaml(model_config)
+        else:
+            model_cfg = model_config
+        cfg = merge_configs(cfg, model_cfg)
+
+    # Merge user config
+    if user_config is not None:
+        if isinstance(user_config, str):
+            user_cfg = load_yaml(user_config)
+        else:
+            user_cfg = user_config
+        cfg = merge_configs(cfg, user_cfg)
+
+    # Apply overrides
+    if overrides is not None:
+        # Convert flat overrides to nested structure if needed
+        nested_overrides = _flatten_to_nested(overrides)
+        cfg = merge_configs(cfg, nested_overrides)
+
+    return cfg
+
+
 def _flatten_to_nested(flat: Dict[str, Any]) -> Dict[str, Any]:
     """
     将扁平化的 CLI 参数转换为嵌套字典结构。
@@ -337,6 +443,21 @@ def parse_args() -> argparse.Namespace:
         help='训练设备（覆盖 train.device）'
     )
 
+    parser.add_argument(
+        '--img-size', '--imgsz',
+        type=int,
+        default=None,
+        dest='img_size',
+        help='图像尺寸（覆盖 train.img_size）'
+    )
+
+    parser.add_argument(
+        '--save-dir',
+        type=str,
+        default=None,
+        help='保存目录（覆盖 train.save_dir）'
+    )
+
     # 位置参数：嵌套配置覆盖（如 optimizer.lr=0.001）
     parser.add_argument(
         'overrides',
@@ -376,6 +497,10 @@ def parse_args() -> argparse.Namespace:
         overrides_dict['train.lr'] = args.lr
     if args.device:
         overrides_dict['train.device'] = args.device
+    if args.img_size is not None:
+        overrides_dict['train.img_size'] = args.img_size
+    if args.save_dir is not None:
+        overrides_dict['train.save_dir'] = args.save_dir
 
     return args
 

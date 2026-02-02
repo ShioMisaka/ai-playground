@@ -12,7 +12,8 @@ from pathlib import Path
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engine.predict import LetterBox, _scale_coords, _post_process, YOLO
+from engine.predict import LetterBox, _scale_coords, _post_process
+from models import YOLO
 
 
 def test_letterbox():

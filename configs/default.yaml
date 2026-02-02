@@ -20,6 +20,10 @@ train:
   scheduler: cosine
   lr_min: 1e-6
 
+  use_ema: True
+  mosaic: True
+  mosaic_disable_epoch: 10
+
 # 验证参数
 val:
   conf: 0.25
