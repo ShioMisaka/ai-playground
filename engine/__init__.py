@@ -1,7 +1,11 @@
 # engine/__init__.py
 
-# 主训练流程
-from .train import train
+# Note: engine.train is now a CLI script that uses YOLO.train() API
+# The old train() function has been moved to engine.trainer.DetectionTrainer
+# To import and use programmatically, use:
+#   from models import YOLO
+#   model = YOLO('configs/models/yolov11n.yaml')
+#   model.train(data='...', epochs=100)
 
 # 核心训练逻辑
 from .training import train_one_epoch, print_metrics
@@ -54,9 +58,6 @@ from .comparison import (
 )
 
 __all__ = [
-    # 主训练
-    'train',
-
     # 核心训练逻辑
     'train_one_epoch',
     'print_metrics',

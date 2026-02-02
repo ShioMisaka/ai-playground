@@ -443,6 +443,21 @@ def parse_args() -> argparse.Namespace:
         help='训练设备（覆盖 train.device）'
     )
 
+    parser.add_argument(
+        '--img-size', '--imgsz',
+        type=int,
+        default=None,
+        dest='img_size',
+        help='图像尺寸（覆盖 train.img_size）'
+    )
+
+    parser.add_argument(
+        '--save-dir',
+        type=str,
+        default=None,
+        help='保存目录（覆盖 train.save_dir）'
+    )
+
     # 位置参数：嵌套配置覆盖（如 optimizer.lr=0.001）
     parser.add_argument(
         'overrides',
@@ -482,6 +497,10 @@ def parse_args() -> argparse.Namespace:
         overrides_dict['train.lr'] = args.lr
     if args.device:
         overrides_dict['train.device'] = args.device
+    if args.img_size is not None:
+        overrides_dict['train.img_size'] = args.img_size
+    if args.save_dir is not None:
+        overrides_dict['train.save_dir'] = args.save_dir
 
     return args
 
