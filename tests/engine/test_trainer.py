@@ -81,3 +81,62 @@ def test_scheduler_creation():
     trainer._setup_scheduler()
 
     assert trainer.scheduler is not None
+
+
+def test_ema_setup():
+    """Test EMA initialization."""
+    model = YOLOv11(nc=2, scale='n')
+
+    config = {
+        'train': {'name': 'test', 'epochs': 1, 'batch_size': 4},
+        'data': {'train': 'dummy.txt', 'nc': 2},
+        'model': {'use_ema': True, 'ema_decay': 0.9999},
+        'device': 'cpu',
+    }
+    trainer = DetectionTrainer(model, config)
+    trainer._setup_model()
+    trainer._setup_ema()
+
+    assert trainer.ema is not None
+    assert trainer.ema.decay == 0.9999
+
+
+def test_ema_disabled():
+    """Test EMA can be disabled."""
+    model = YOLOv11(nc=2, scale='n')
+
+    config = {
+        'train': {'name': 'test', 'epochs': 1, 'batch_size': 4},
+        'data': {'train': 'dummy.txt', 'nc': 2},
+        'model': {'use_ema': False},
+        'device': 'cpu',
+    }
+    trainer = DetectionTrainer(model, config)
+    trainer._setup_ema()
+
+    assert trainer.ema is None
+
+
+def test_mosaic_setup():
+    """Test Mosaic initialization."""
+    model = YOLOv11(nc=2, scale='n')
+
+    config = {
+        'train': {
+            'name': 'test',
+            'epochs': 1,
+            'batch_size': 4,
+            'img_size': 640,
+            'mosaic': True,
+            'mosaic_prob': 0.9,
+        },
+        'data': {'train': 'dummy.txt', 'nc': 2},
+        'device': 'cpu',
+    }
+    trainer = DetectionTrainer(model, config)
+    trainer._setup_mosaic()
+
+    # Mosaic is set to None initially, will be configured after data loaders are created
+    assert trainer.mosaic_enabled is True
+    assert trainer.mosaic_prob == 0.9
+    assert trainer.mosaic is None  # Will be set after data loaders are created

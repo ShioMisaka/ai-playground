@@ -149,11 +149,29 @@ class DetectionTrainer:
 
     def _setup_ema(self):
         """Setup EMA."""
-        raise NotImplementedError("EMA setup not yet implemented")
+        model_cfg = self.config.get('model', {})
+        use_ema = model_cfg.get('use_ema', True)
+        if not use_ema:
+            self.ema = None
+            return
+
+        decay = model_cfg.get('ema_decay', 0.9999)
+        self.ema = ModelEMA(self.model, decay=decay)
 
     def _setup_mosaic(self):
         """Setup Mosaic data augmentation."""
-        raise NotImplementedError("Mosaic setup not yet implemented")
+        enable_mosaic = self.train_cfg.get('mosaic', True)
+        if not enable_mosaic:
+            self.mosaic = None
+            self.mosaic_enabled = False
+            self.mosaic_prob = 0.0
+            return
+
+        # Mosaic requires dataset access - will be set during data loading
+        # For now, create a placeholder that will be configured later
+        self.mosaic_enabled = enable_mosaic
+        self.mosaic_prob = self.train_cfg.get('mosaic_prob', 1.0)
+        self.mosaic = None  # Will be set after data loaders are created
 
     def _setup_logging(self):
         """Setup logging systems."""
