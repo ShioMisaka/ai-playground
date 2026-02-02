@@ -4,9 +4,6 @@
 
 从训练日志 CSV 文件生成所有训练曲线图表。
 
-用法:
-    python scripts/plot_curves.py <csv_path> [output_dir]
-
 示例:
     # 使用默认输出目录（CSV 所在目录）
     python scripts/plot_curves.py outputs/train/exp1/training_log.csv

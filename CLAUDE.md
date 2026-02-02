@@ -307,3 +307,77 @@ history['train_loss'].append(float(train_loss))
 eval "$(conda shell.bash hook)"
 conda activate torch_cpu
 ```
+
+---
+
+## 新的统一 YOLO 接口
+
+### 使用方式
+
+```python
+from models import YOLO
+
+# 创建模型
+model = YOLO('configs/models/yolov11n.yaml')
+# 或从模型实例创建
+model = YOLO(YOLOv11(nc=2, scale='n'))
+
+# 推理
+results = model.predict('image.jpg')
+results = model.predict('image.jpg', conf=0.3, iou=0.5)
+
+# 便捷调用
+results = model('image.jpg')
+```
+
+### 预处理一致性
+
+训练、验证、推理现在都使用相同的 letterbox 预处理，确保一致性。
+
+**核心原则**：
+- 训练时：`YOLODataset` 使用 letterbox 预处理
+- 验证时：`YOLODataset` 使用 letterbox 预处理
+- 推理时：`Preprocessor` 使用相同的 letterbox 预处理
+
+### 组件说明
+
+- **`Preprocessor`**: 统一的图像预处理类 (`engine/preprocessor.py`)
+  - 支持 letterbox 和简单 resize 两种模式
+  - 返回归一化后的张量和预处理参数字典（用于坐标映射）
+
+- **`Postprocessor`**: 统一的后处理类 (`engine/postprocessor.py`)
+  - NMS、置信度过滤
+  - 坐标映射：从预处理空间映射回原图空间
+
+- **`BaseTask`**: 任务处理器基类 (`engine/base.py`)
+  - 提供统一的预处理和后处理功能
+  - 管理设备和模型
+
+- **`Predictor`**: 统一的推理器 (`engine/predictor_v2.py`)
+  - 对单张图像执行预测
+  - 返回 Results 对象
+
+- **`YOLO`**: Ultralytics 风格的统一接口类 (`models/yolo.py`)
+  - 支持从配置文件、权重文件或模型实例创建
+  - 提供 `predict()` 方法进行推理
+
+### 配置文件
+
+**默认配置** (`configs/default.yaml`):
+```yaml
+train:
+  letterbox: true  # 使用 letterbox 预处理
+  img_size: 640
+  epochs: 100
+  batch_size: 16
+
+val:
+  letterbox: true
+  conf: 0.25
+  iou: 0.45
+
+predict:
+  letterbox: true
+  conf: 0.25
+  iou: 0.45
+```

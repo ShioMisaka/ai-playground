@@ -15,7 +15,7 @@ def get_data_loader(path : str, is_train: bool):
 class YOLODataset(Dataset):
     """YOLO格式数据集加载器"""
 
-    def __init__(self, img_dir, label_dir, img_size=640, augment=False, transform=None):
+    def __init__(self, img_dir, label_dir, img_size=640, augment=False, transform=None, letterbox=True):
         """
         Args:
             img_dir: 图片目录路径
@@ -23,12 +23,14 @@ class YOLODataset(Dataset):
             img_size: 输入图像尺寸
             augment: 是否进行数据增强（保留用于兼容）
             transform: 自定义数据增强变换（Mosaic, Mixup 等）
+            letterbox: 是否使用 letterbox 预处理
         """
         self.img_dir = Path(img_dir)
         self.label_dir = Path(label_dir)
         self.img_size = img_size
         self.augment = augment
         self.transform = transform
+        self.letterbox = letterbox  # 新增
         
         # 获取所有图片文件
         self.img_files = []
@@ -90,12 +92,93 @@ class YOLODataset(Dataset):
         if self.transform is not None:
             img, boxes = self.transform(img, boxes)
 
-        # 调整图片大小
-        img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
-        img = np.array(img).astype(np.float32) / 255.0
-        img = torch.from_numpy(img).permute(2, 0, 1)  # HWC -> CHW
+        # 转换为 numpy 数组
+        img = np.array(img).astype(np.float32)
 
-        return img, boxes, str(self.img_files[idx])
+        # 预处理：letterbox 或简单 resize
+        letterbox_params = None  # 存储letterbox参数 (r, pad_w, pad_h)
+
+        import cv2
+        img_h, img_w = img.shape[:2]
+
+        # 检测是否是 Mosaic 输出的图像（2*img_size × 2*img_size）
+        is_mosaic = (img_h == self.img_size * 2) and (img_w == self.img_size * 2)
+
+        if self.letterbox:
+            if is_mosaic:
+                # Mosaic 图像：从 2*img_size × 2*img_size resize 到 img_size × img_size
+                img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+
+                # Boxes 坐标需要缩放 0.5（因为图像尺寸缩小了一半）
+                if len(boxes) > 0:
+                    boxes[:, 1:] *= 0.5  # 所有坐标缩放 0.5
+
+                # Mosaic 不需要 letterbox 参数（没有填充偏移）
+                letterbox_params = None
+            else:
+                # 非 Mosaic 图像：使用标准 letterbox
+                r = min(self.img_size / img_h, self.img_size / img_w)
+                scaled_h, scaled_w = int(round(img_h * r)), int(round(img_w * r))
+
+                # 缩放
+                img = cv2.resize(img, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
+
+                # 填充 - 确保最终尺寸精确为 img_size
+                pad_h = self.img_size - scaled_h
+                pad_w = self.img_size - scaled_w
+                # 上下左右均分填充
+                top, bottom = pad_h // 2, pad_h - pad_h // 2
+                left, right = pad_w // 2, pad_w - pad_w // 2
+                img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+
+                # 存储 letterbox 参数
+                letterbox_params = (r, left, top)
+
+                # 调整边界框坐标以匹配 letterbox 变换
+                if len(boxes) > 0:
+                    # Boxes 格式: [class_id, x_center, y_center, width, height] (归一化坐标)
+                    #
+                    # 正确的 letterbox 坐标变换：
+                    # 1. 归一化坐标 -> 原图像素坐标 (乘以原图尺寸)
+                    # 2. 应用 letterbox 缩放 (乘以 r)
+                    # 3. 加上填充偏移
+                    # 4. 归一化到 img_size
+                    #
+                    # 公式: coord_new = coord_norm * orig_dim * r / img_size + offset / img_size
+
+                    # 对于 x_center 和 width：使用原图宽度 img_w
+                    boxes[:, 1] = boxes[:, 1] * img_w * r / self.img_size  # x_center (缩放后)
+                    boxes[:, 3] = boxes[:, 3] * img_w * r / self.img_size  # width (缩放后)
+
+                    # 对于 y_center 和 height：使用原图高度 img_h
+                    boxes[:, 2] = boxes[:, 2] * img_h * r / self.img_size  # y_center (缩放后)
+                    boxes[:, 4] = boxes[:, 4] * img_h * r / self.img_size  # height (缩放后)
+
+                    # 调整中心点坐标（加上填充偏移）
+                    # 归一化的偏移量 = pad / img_size
+                    boxes[:, 1] += left / self.img_size  # x_center 加上水平填充
+                    boxes[:, 2] += top / self.img_size   # y_center 加上垂直填充
+        else:
+            # 简单 resize - 不需要letterbox参数
+            img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
+
+            # 归一化坐标需要随图像尺寸缩放
+            # 坐标缩放因子 = old_size / new_size
+            if len(boxes) > 0:
+                scale_x = img_w / self.img_size  # x 方向缩放
+                scale_y = img_h / self.img_size  # y 方向缩放
+                boxes[:, 1] *= scale_x  # x_center
+                boxes[:, 2] *= scale_y  # y_center
+                boxes[:, 3] *= scale_x  # width
+                boxes[:, 4] *= scale_y  # height
+
+        # 归一化
+        img = img.astype(np.float32) / 255.0
+
+        # HWC -> CHW
+        img = torch.from_numpy(img).permute(2, 0, 1)
+
+        return img, boxes, str(self.img_files[idx]), letterbox_params
 
 def load_yaml_config(yaml_path):
     """加载YAML配置文件"""
@@ -105,35 +188,67 @@ def load_yaml_config(yaml_path):
 
 
 def collate_fn(batch):
-    """自定义批处理函数，处理不同数量的边界框"""
-    imgs, boxes, paths = zip(*batch)
-    
+    """自定义批处理函数，处理不同数量的边界框和 letterbox 参数
+
+    Args:
+        batch: (img, boxes, path, letterbox_params) 元组列表
+
+    Returns:
+        imgs: 堆叠的图像张量
+        targets: 合并的目标张量 (N, 9) - [batch_idx, class_id, x, y, w, h, r, pad_w, pad_h]
+        paths: 图像路径列表
+        letterbox_params_list: 每个 sample 的 letterbox 参数列表
+    """
+    imgs, boxes, paths, letterbox_params_list = zip(*batch)
+
     # 堆叠图片
     imgs = torch.stack(imgs, 0)
-    
-    # 为每个标签添加batch索引
+
+    # 为每个标签添加batch索引和letterbox参数
     boxes_with_idx = []
-    for i, box in enumerate(boxes):
+    for i, (box, lb_params) in enumerate(zip(boxes, letterbox_params_list)):
         if box.shape[0] > 0:
             # 在第一列添加batch索引
             batch_idx = torch.full((box.shape[0], 1), i, dtype=torch.float32)
             box_with_idx = torch.cat([batch_idx, box], dim=1)
+
+            # 添加 letterbox 参数 (r, left, top) 到每个box
+            # 这样每行变成: [batch_idx, class_id, x, y, w, h, r, left, top]
+            if lb_params is not None:
+                r, left, top = lb_params
+                # 使用 expand 创建相同值的 tensor
+                lb_values = torch.tensor([[r, left, top]], dtype=torch.float32)
+                lb_tensor = lb_values.expand(box.shape[0], 3)
+                box_with_idx = torch.cat([box_with_idx, lb_tensor], dim=1)
+            else:
+                # 没有letterbox (使用简单resize)，用0填充
+                lb_tensor = torch.zeros((box.shape[0], 3), dtype=torch.float32)
+                box_with_idx = torch.cat([box_with_idx, lb_tensor], dim=1)
+
             boxes_with_idx.append(box_with_idx)
-    
+
     # 合并所有boxes
     if len(boxes_with_idx) > 0:
         targets = torch.cat(boxes_with_idx, 0)
     else:
-        targets = torch.zeros((0, 6), dtype=torch.float32)
-    
-    return imgs, targets, paths
+        # 空目标，格式：[batch_idx, class_id, x, y, w, h, r, pad_w, pad_h]
+        targets = torch.zeros((0, 9), dtype=torch.float32)
 
-def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0):
-    """创建训练和验证数据加载器"""
-    
+    return imgs, targets, paths, list(letterbox_params_list)
+
+def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0, letterbox=True):
+    """创建训练和验证数据加载器
+
+    Args:
+        config_path: 数据配置文件路径
+        batch_size: 批大小
+        img_size: 图像尺寸
+        workers: 数据加载线程数
+        letterbox: 是否使用 letterbox 预处理
+    """
     # 加载配置
     config = load_yaml_config(config_path)
-    
+
     # 获取数据集根路径
     data_yaml_path = Path(config_path)
     if data_yaml_path.parent.name == config['path']:
@@ -149,14 +264,15 @@ def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0):
     # 将 'images/train' 替换为 'labels/train'
     train_label_path = config['train'].replace('images', 'labels')
     train_label_dir = root_path / train_label_path
-    
+
     train_dataset = YOLODataset(
         img_dir=train_img_dir,
         label_dir=train_label_dir,
         img_size=img_size,
-        augment=True
+        augment=True,
+        letterbox=letterbox  # 新增
     )
-    
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -166,19 +282,20 @@ def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0):
         pin_memory=False,
         persistent_workers=False
     )
-    
+
     # 创建验证集
     val_img_dir = root_path / config['val']
     val_label_path = config['val'].replace('images', 'labels')
     val_label_dir = root_path / val_label_path
-    
+
     val_dataset = YOLODataset(
         img_dir=val_img_dir,
         label_dir=val_label_dir,
         img_size=img_size,
-        augment=False
+        augment=False,
+        letterbox=letterbox  # 新增
     )
-    
+
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -188,5 +305,5 @@ def create_dataloaders(config_path, batch_size=16, img_size=640, workers=0):
         pin_memory=False,
         persistent_workers=False
     )
-    
+
     return train_loader, val_loader, config

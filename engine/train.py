@@ -12,9 +12,21 @@ from rich.console import Console
 
 from .training import train_one_epoch, print_metrics
 from .validate import validate
+<<<<<<< HEAD
 from utils import (create_dataloaders, TrainingLogger, LiveTableLogger, plot_training_curves,
                    print_training_start_2x2, print_detection_header, get_save_dir,
                    ModelEMA, print_training_completion, print_mosaic_disabled)
+=======
+
+# 直接从子模块导入，避免循环导入
+from utils.load import create_dataloaders
+from utils.logger import TrainingLogger, LiveTableLogger
+from utils.curves import plot_training_curves
+from utils.model_summary import print_training_start_2x2, print_training_completion, print_mosaic_disabled
+from utils.table import print_detection_header
+from utils.path_helper import get_save_dir
+from utils.ema import ModelEMA
+>>>>>>> feature/predictor
 from utils.transforms import MosaicTransform
 
 
@@ -99,6 +111,7 @@ def train(model, cfg: dict, data_config=None):
     batch_size = train_cfg['batch_size']
     name = train_cfg['name']
     save_dir_base = train_cfg['save_dir']
+    letterbox = train_cfg.get('letterbox', True)  # 是否使用 letterbox 预处理
     img_size = model_cfg['img_size']
     use_ema = model_cfg['use_ema']
     ema_decay = model_cfg.get('ema_decay', 0.9999)
@@ -117,11 +130,14 @@ def train(model, cfg: dict, data_config=None):
         config_path=data_path,
         batch_size=batch_size,
         img_size=img_size,
-        workers=workers
+        workers=workers,
+        letterbox=letterbox  # 传递 letterbox 参数
     )
 
     # 添加 Mosaic 增强到训练数据集
-    if use_mosaic and epochs > close_mosaic:
+    # close_mosaic 表示最后 N 个 epoch 关闭 mosaic
+    # 只有当 total_epochs > close_mosaic 时才启用 mosaic（确保有足够的时间使用）
+    if use_mosaic and close_mosaic > 0 and epochs > close_mosaic:
         mosaic_transform = MosaicTransform(
             dataset=train_loader.dataset,
             img_size=img_size,

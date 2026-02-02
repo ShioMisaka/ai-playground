@@ -905,10 +905,15 @@ class YOLOLossAnchorFree(nn.Module):
         return bboxes
 
     def _preprocess_targets(self, targets, batch_size):
-        """Preprocess targets into batch format
+        """Preprocess targets into batch format with letterbox support
+
+        处理 letterbox 坐标变换：
+        - 如果 targets 包含 letterbox 参数 (r, left, top)，则逆向变换回原始坐标
+        - 如果 r=0（简单 resize），则直接使用坐标
 
         Args:
-            targets: (N, 6) - (batch_idx, class_id, x, y, w, h) normalized [0, 1]
+            targets: (N, 9) - (batch_idx, class_id, x, y, w, h, r, left, top)
+                      或 (N, 6) - (batch_idx, class_id, x, y, w, h) 旧格式
             batch_size: batch size
 
         Returns:
@@ -929,11 +934,14 @@ class YOLOLossAnchorFree(nn.Module):
         # Initialize output tensors
         gt_bboxes = torch.zeros(batch_size, max_gt, 4, device=device)
         gt_labels = torch.zeros(batch_size, max_gt, 1, dtype=torch.long, device=device)
-        batch_idx = torch.zeros(batch_size, max_gt, 1, dtype=torch.long, device=device)
+        batch_idx_out = torch.zeros(batch_size, max_gt, 1, dtype=torch.long, device=device)
         mask_gt = torch.zeros(batch_size, max_gt, 1, dtype=torch.bool, device=device)
 
         if targets.shape[0] == 0:
-            return gt_bboxes, gt_labels, batch_idx, mask_gt
+            return gt_bboxes, gt_labels, batch_idx_out, mask_gt
+
+        # 检查是否包含 letterbox 参数
+        has_letterbox = targets.shape[1] >= 9
 
         # Fill in targets
         for b in range(batch_size):
@@ -944,19 +952,29 @@ class YOLOLossAnchorFree(nn.Module):
             n = mask.sum()
             b_targets = targets[mask]
 
+            # 提取坐标和可能的 letterbox 参数
+            xy_norm = b_targets[:, 2:4]  # 归一化坐标 (letterbox 变换后)
+            wh_norm = b_targets[:, 4:6]
+
+            # 不需要逆变换！
+            # 模型预测的是 letterbox 变换后的图像空间中的坐标
+            # 损失也应该在这个空间中计算
+            # 这样模型学习的是在 letterbox 后的图像中定位目标
+            # 推理时再逆变换回原图
+
             # Convert xywh to xyxy and scale to pixels
-            xy = b_targets[:, 2:4] * self.img_size
-            wh = b_targets[:, 4:6] * self.img_size
+            xy = xy_norm * self.img_size
+            wh = wh_norm * self.img_size
             x1y1 = xy - wh / 2
             x2y2 = xy + wh / 2
             bboxes = torch.cat([x1y1, x2y2], dim=-1)
 
             gt_bboxes[b, :n] = bboxes
             gt_labels[b, :n] = b_targets[:, 1:2].long()
-            batch_idx[b, :n] = b_targets[:, 0:1].long()
+            batch_idx_out[b, :n] = b_targets[:, 0:1].long()
             mask_gt[b, :n] = 1
 
-        return gt_bboxes, gt_labels, batch_idx, mask_gt
+        return gt_bboxes, gt_labels, batch_idx_out, mask_gt
 
     def _compute_empty_target_loss(self, predictions):
         """Handle empty targets"""

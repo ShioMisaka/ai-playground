@@ -35,6 +35,9 @@ from .yolov3 import YOLOv3
 # YOLOv11 模型
 from .yolov11 import YOLOv11
 
+# YOLO 统一接口
+from .yolo import YOLO
+
 __all__ = [
     # BiFPN (from modules)
     'BiFPN_Cat',
@@ -64,4 +67,5 @@ __all__ = [
     'YOLOLoss',
     'YOLOv3',
     'YOLOv11',
+    'YOLO',
 ]

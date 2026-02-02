@@ -78,7 +78,16 @@ def train_one_epoch(
 
     epoch_start_time = time.time()
 
-    for batch_idx, (imgs, targets, paths) in enumerate(dataloader):
+    for batch_idx, batch_data in enumerate(dataloader):
+        # 兼容新旧数据格式
+        if len(batch_data) == 4:
+            # 新格式：(imgs, targets, paths, letterbox_params_list)
+            imgs, targets, paths, letterbox_params_list = batch_data
+        else:
+            # 旧格式：(imgs, targets, paths)
+            imgs, targets, paths = batch_data
+            letterbox_params_list = None
+
         imgs = imgs.to(device)
         targets = targets.to(device)
 
@@ -88,19 +97,25 @@ def train_one_epoch(
         # 尝试不同的调用方式
         loss_items = None  # Track loss_items for printing
         try:
-            # 方式1: 模型接受 targets 参数，返回 (loss, loss_items, predictions)
+            # 新版 YOLOv11: 调用模型时传入 targets，返回字典格式
+            # {'loss': loss, 'loss_items': [box_loss, cls_loss, dfl_loss], 'predictions': predictions}
             outputs = model(imgs, targets)
-            # Check if outputs is tuple/list with 3 elements (new ultralytics-style format)
-            if isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
+
+            # 新格式：返回字典
+            if isinstance(outputs, dict):
+                loss = outputs['loss']
+                loss_items = outputs.get('loss_items')
+                predictions = outputs.get('predictions')
+            # 旧格式兼容：返回 tuple/list
+            elif isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
                 loss_for_backward = outputs[0]
                 loss_items = outputs[1]
                 predictions = outputs[2] if len(outputs) > 2 else None
-                # loss_items contains [box_loss, cls_loss, dfl_loss] (not multiplied by batch_size)
                 loss = loss_for_backward
             else:
                 raise TypeError("Unexpected output format")
-        except TypeError:
-            # 方式2: 模型不接受 targets 参数
+        except Exception as e:
+            # 方式2: 模型不接受 targets 参数（旧版本兼容）
             outputs = model(imgs)
             # 如果模型有 compute_loss 方法
             if hasattr(model, 'compute_loss'):
@@ -108,7 +123,7 @@ def train_one_epoch(
             elif hasattr(model, 'detect') and hasattr(model.detect, 'compute_loss'):
                 outputs = {'predictions': outputs, 'loss': model.detect.compute_loss(outputs, targets)}
             else:
-                print("警告: 模型没有 compute_loss 方法，使用占位 loss")
+                print(f"警告: 模型前向传播失败 - {e}")
                 loss = torch.tensor(1.0, device=device, requires_grad=True)
                 outputs = {'loss': loss}
             loss = outputs.get('loss', loss)

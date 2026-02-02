@@ -174,7 +174,7 @@ class YOLOv11(nn.Module):
 
     def forward(self, x: torch.Tensor, targets=None):
         """
-        Forward pass
+        前向传播
 
         Args:
             x: input images [batch, 3, height, width]
@@ -183,7 +183,13 @@ class YOLOv11(nn.Module):
 
         Returns:
             If targets is None: predictions (inference mode)
-            If targets is provided: dict with 'predictions' and 'loss'
+                (bs, n_anchors, 4+nc) 格式的预测张量
+            If targets is provided: dict with loss and predictions (training mode)
+                {
+                    'loss': loss_for_backward,
+                    'loss_items': [box_loss, cls_loss, dfl_loss],
+                    'predictions': (bs, n_anchors, 4+nc)
+                }
         """
         # ===== Backbone =====
         x = self.conv0(x)           # 0
@@ -222,13 +228,30 @@ class YOLOv11(nn.Module):
         p5 = self.c3k2_22(x)                # 22
 
         # ===== Detection Head =====
-        predictions = self.detect([p3, p4, p5])
+        # detect.forward() 根据模式返回不同格式：
+        # - 训练模式: {'cls': cls_outputs, 'reg': reg_outputs}
+        # - 推理模式: (bs, n_anchors, 4+nc) 格式的预测张量
+        detect_output = self.detect([p3, p4, p5])
 
-        # If targets provided, compute loss
+        # 如果提供了 targets，计算 loss
         if targets is not None:
-            # Anchor-free: predictions is {'cls': [...], 'reg': [...]}
-            # loss_fn returns (loss * batch_size, loss.detach()) following ultralytics format
-            loss_for_backward, loss_items = self.loss_fn(predictions, targets)
-            return loss_for_backward, loss_items, predictions
+            # 训练模式：detect_output 是 {'cls': cls_outputs, 'reg': reg_outputs}
+            # 计算 loss 需要预测结果（用于后续 NMS）
+            # 需要临时调用 _decode_inference 获取预测
+            predictions = self.detect._decode_inference(detect_output['cls'], detect_output['reg'], [p3, p4, p5])
 
-        return predictions
+            # 构建损失字典
+            loss_dict = detect_output  # {'cls': cls_outputs, 'reg': reg_outputs}
+
+            # 计算损失
+            loss_for_backward, loss_items = self.loss_fn(loss_dict, targets)
+
+            # 返回字典格式
+            return {
+                'loss': loss_for_backward,
+                'loss_items': loss_items,
+                'predictions': predictions
+            }
+
+        # 推理模式：detect_output 已经是预测张量
+        return detect_output

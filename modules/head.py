@@ -130,33 +130,41 @@ class DetectAnchorFree(nn.Module):
 
     def forward(self, x):
         """
+        统一的前向传播
+
         Args:
             x: list of 3 feature maps [P3, P4, P5]
+
         Returns:
-            if training: {'cls': [(bs, nc, h, w), ...], 'reg': [(bs, 4*reg_max, h, w), ...]}
-            if inference: (concatenated predictions, dict of outputs)
+            if training: {'cls': [(bs, nc, h, w), ...], 'reg': [(bs, 4, reg_max, h, w), ...]}
+            if inference: (bs, n_anchors, 4+nc) 格式的预测张量
         """
         cls_outputs = []
         reg_outputs = []
 
         for i in range(self.nl):
-            # Direct classification output (no intermediate layer)
+            # Direct classification output
             cls_output = self.cv3[i](x[i])  # (bs, nc, h, w)
             cls_outputs.append(cls_output)
 
-            # Direct regression output (no intermediate layer)
+            # Direct regression output
             reg_output = self.cv4[i](x[i])  # (bs, 4*reg_max, h, w)
             reg_output = reg_output.reshape(-1, 4, self.reg_max, reg_output.shape[2], reg_output.shape[3])
             reg_outputs.append(reg_output)
 
         if not self.training:
-            # Inference: convert DFL distribution to bbox coordinates
+            # 推理模式：解码预测
             return self._decode_inference(cls_outputs, reg_outputs, x)
 
+        # 训练模式：返回原始输出用于 loss 计算
         return {'cls': cls_outputs, 'reg': reg_outputs}
 
     def _decode_inference(self, cls_outputs, reg_outputs, x):
-        """Decode predictions for inference"""
+        """解码预测为统一格式
+
+        Returns:
+            predictions: (bs, n_anchors, 4+nc) 格式的预测张量
+        """
         z = []
 
         for i in range(self.nl):
@@ -207,4 +215,4 @@ class DetectAnchorFree(nn.Module):
             output = output.view(bs, -1, self.nc + 4)
             z.append(output)
 
-        return torch.cat(z, 1), {'cls': cls_outputs, 'reg': reg_outputs}
+        return torch.cat(z, 1)
