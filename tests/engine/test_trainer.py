@@ -41,7 +41,7 @@ def test_optimizer_creation():
     config = {
         'train': {'name': 'test', 'epochs': 1, 'batch_size': 4},
         'data': {'train': 'dummy.txt', 'nc': 2},
-        'optimizer': {'type': 'Adam', 'lr': 0.001},
+        'optimizer': {'type': 'Adam', 'lr': 0.001, 'weight_decay': 0.0005},
         'device': 'cpu',
     }
     trainer = DetectionTrainer(model, config)
@@ -50,6 +50,18 @@ def test_optimizer_creation():
 
     assert trainer.optimizer is not None
     assert trainer.optimizer.param_groups[0]['lr'] == 0.001
+
+    # Verify parameter groups are correctly configured
+    assert len(trainer.optimizer.param_groups) == 3, "Optimizer should have 3 parameter groups"
+
+    # pg0 (BatchNorm weights) should have weight_decay=0.0
+    assert trainer.optimizer.param_groups[0]['weight_decay'] == 0.0, "BatchNorm weights should have no weight decay"
+
+    # pg1 (Other weights) should have the configured weight_decay
+    assert trainer.optimizer.param_groups[1]['weight_decay'] == 0.0005, "Other weights should have configured weight decay"
+
+    # pg2 (Biases) should have weight_decay=0.0
+    assert trainer.optimizer.param_groups[2]['weight_decay'] == 0.0, "Biases should have no weight decay"
 
 
 def test_scheduler_creation():

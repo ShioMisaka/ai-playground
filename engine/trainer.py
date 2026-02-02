@@ -112,7 +112,7 @@ class DetectionTrainer:
 
         # Get trainable parameters
         pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-        for k, v in self.model.named_modules():
+        for _, v in self.model.named_modules():
             if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
                 pg2.append(v.bias)  # biases
             if isinstance(v, nn.BatchNorm2d):
@@ -121,11 +121,11 @@ class DetectionTrainer:
                 pg1.append(v.weight)  # apply decay
 
         optimizer_cls = getattr(torch.optim, optim_type, torch.optim.Adam)
-        self.optimizer = optimizer_cls(
-            pg0 + pg1 + pg2,
-            lr=lr,
-            weight_decay=weight_decay,
-        )
+        self.optimizer = optimizer_cls([
+            {'params': pg0, 'weight_decay': 0.0},  # BatchNorm weights - no decay
+            {'params': pg1, 'weight_decay': weight_decay},  # Other weights - with decay
+            {'params': pg2, 'weight_decay': 0.0},  # Biases - no decay
+        ], lr=lr)
 
     def _setup_scheduler(self):
         """Setup learning rate scheduler."""
