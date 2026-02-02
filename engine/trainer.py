@@ -26,7 +26,7 @@ from utils import (
     print_mosaic_disabled,
 )
 from utils.transforms import MosaicTransform
-from engine.training import train_one_epoch
+from engine.training import train_one_epoch, print_metrics
 from engine.validate import validate
 
 
@@ -186,12 +186,9 @@ class DetectionTrainer:
         )
         self.csv_logger.open()
 
-        # Live table logger
+        # Live table logger - 只包含训练时的 loss 列（验证指标通过 print_metrics 打印）
         self.live_logger = LiveTableLogger(
-            columns=[
-                "total_loss", "box_loss", "cls_loss", "dfl_loss",
-                "precision", "recall", "mAP50", "mAP50-95"
-            ],
+            columns=["total_loss", "box_loss", "cls_loss", "dfl_loss"],
             total_epochs=self.train_cfg.get('epochs', 100),
             console_width=self.train_cfg.get('console_width', 130),
         )
@@ -204,7 +201,6 @@ class DetectionTrainer:
             Dict containing training results (best_map, final_loss, etc.)
         """
         import time
-        from utils.curves import plot_training_curves
 
         self.setup()
 
@@ -261,11 +257,12 @@ class DetectionTrainer:
                 if hasattr(val_model, 'detect'):
                     val_model.detect.eval()
 
-                # Update loggers
-                self.live_logger.update_row("train", train_metrics)
-                self.live_logger.update_row("val", val_metrics)
-
                 epoch_time = time.time() - epoch_start
+
+                # 打印训练和验证指标（使用与 train.py 相同的方式）
+                is_detection = hasattr(self.model, 'detect')
+                print_metrics(train_metrics, val_metrics, is_detection, self.live_logger)
+
                 self.live_logger.end_epoch(epoch_time)
 
                 self.csv_logger.write_epoch(
@@ -291,11 +288,8 @@ class DetectionTrainer:
             self.live_logger.stop()
             self.csv_logger.close()
 
-        # Plot training curves
-        csv_path = self.save_dir / 'results.csv'
-        plot_training_curves(str(csv_path), save_dir=str(self.save_dir))
-
-        print(f"\nTraining complete. Best mAP50: {self.best_map:.4f}")
+        # 注意：训练完成信息和曲线绘制由外部接口 (models/yolo.py) 处理
+        # 这里只返回训练结果
 
         return {
             'best_map': self.best_map,

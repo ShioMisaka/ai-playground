@@ -20,6 +20,7 @@ results = model.train(
     name='test_exp',
     save_dir='runs/train',
     mosaic=False,  # 关闭 Mosaic 数据增强
+    cfg_path='runs/config/test.yaml',
 )
 
 print(f"训练完成！Best mAP50: {results['best_map']:.4f}")
