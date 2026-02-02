@@ -8,7 +8,7 @@ import yaml
 import random
 import numpy as np
 from pathlib import Path
-from typing import Union, List, Optional, Tuple, Dict
+from typing import Union, List, Optional, Tuple, Dict, Any
 from glob import glob
 
 # 从 engine.predict 导入预测所需的工具类和函数
@@ -17,6 +17,10 @@ from engine.predict import (
     _post_process,
     Results
 )
+
+# 训练相关导入
+from engine.trainer import DetectionTrainer
+from utils.config import load_yaml, merge_training_config
 
 
 class YOLO:
@@ -27,11 +31,15 @@ class YOLO:
         >>> results = model.predict("image.jpg", conf=0.25, save=True)
         >>> for r in results:
         ...     print(r.boxes.xyxy)
+
+        >>> # Or from config for training
+        >>> model = YOLO("configs/models/yolov11n.yaml")
+        >>> model.train(data="configs/data/coco8.yaml", epochs=100)
     """
 
     def __init__(
         self,
-        weights_path: Union[str, Path],
+        model_path: Union[str, Path],
         device: Optional[str] = None,
         conf: float = 0.25,
         iou: float = 0.45,
@@ -41,10 +49,12 @@ class YOLO:
         nc: Optional[int] = None,
         scale: str = "n"
     ):
-        """加载 YOLOv11 模型
+        """加载或创建 YOLOv11 模型
 
         Args:
-            weights_path: 权重文件路径 (.pt)
+            model_path: 模型路径，可以是：
+                - 权重文件路径 (.pt) - 加载训练好的模型
+                - 模型配置文件 (.yaml) - 创建新模型用于训练
             device: 设备 ("cuda:0", "cpu"，None 自动选择)
             conf: 默认置信度阈值
             iou: 默认 NMS IoU 阈值
@@ -52,9 +62,54 @@ class YOLO:
             simple_resize: True=直接resize(匹配训练), False=letterbox(保持长宽比)
             data_config: 数据集 YAML 配置文件路径（用于自动加载类别名称）
             nc: 类别数量（优先从 data_config 读取，否则使用此参数）
-            scale: 模型缩放 (n/s/m/l/x)
+            scale: 模型缩放 (n/s/m/l/x)，仅用于从 config 创建模型时
         """
-        self.weights_path = Path(weights_path)
+        self.model_path = Path(model_path)
+        self._is_training_mode = False  # Track if model was created for training
+
+        # 判断是权重文件还是配置文件
+        if self.model_path.suffix in ['.pt', '.pth']:
+            # 从权重文件加载
+            self._load_from_weights(
+                self.model_path, device, conf, iou, img_size,
+                simple_resize, data_config, nc, scale
+            )
+        elif self.model_path.suffix in ['.yaml', '.yml']:
+            # 从配置文件创建新模型（用于训练）
+            self._create_from_config(
+                self.model_path, device, data_config, nc, scale
+            )
+            self._is_training_mode = True
+        else:
+            raise ValueError(
+                f"不支持的文件类型: {self.model_path.suffix}。"
+                "请提供 .pt/.pth (权重文件) 或 .yaml/.yml (配置文件)"
+            )
+
+        # 设置默认参数
+        self.conf = conf
+        self.iou = iou
+        self.img_size = img_size
+        self.auto = img_size is None
+        self.simple_resize = simple_resize
+
+        # 预处理器
+        self.letterbox = LetterBox(auto=self.auto)
+
+    def _load_from_weights(
+        self,
+        weights_path: Path,
+        device: Optional[str],
+        conf: float,
+        iou: float,
+        img_size: Optional[int],
+        simple_resize: bool,
+        data_config: Optional[Union[str, Path]],
+        nc: Optional[int],
+        scale: str
+    ):
+        """从权重文件加载模型"""
+        self.weights_path = weights_path
         if not self.weights_path.exists():
             raise FileNotFoundError(f"权重文件不存在: {weights_path}")
 
@@ -103,11 +158,6 @@ class YOLO:
         self.model = self.model.to(self.device)
 
         # 默认参数
-        self.conf = conf
-        self.iou = iou
-        self.img_size = img_size
-        self.auto = img_size is None
-        self.simple_resize = simple_resize
         self._nc = final_nc
 
         # 加载类别名称
@@ -118,8 +168,70 @@ class YOLO:
             self.names = {i: f"class_{i}" for i in range(final_nc)}
             self.data_config = None
 
-        # 预处理器
-        self.letterbox = LetterBox(auto=self.auto)
+    def _create_from_config(
+        self,
+        config_path: Path,
+        device: Optional[str],
+        data_config: Optional[Union[str, Path]],
+        nc: Optional[int],
+        scale: str
+    ):
+        """从配置文件创建新模型（用于训练）"""
+        if not config_path.exists():
+            raise FileNotFoundError(f"配置文件不存在: {config_path}")
+
+        # 加载模型配置
+        model_cfg = load_yaml(str(config_path))
+
+        # 获取类别数量
+        if data_config:
+            yaml_names = self._load_names_from_yaml(data_config)
+            nc_from_yaml = len(yaml_names) if yaml_names else None
+            final_nc = nc_from_yaml if nc_from_yaml is not None else nc
+        elif 'model' in model_cfg and 'nc' in model_cfg['model']:
+            final_nc = model_cfg['model']['nc']
+        elif 'nc' in model_cfg:
+            final_nc = model_cfg['nc']
+        else:
+            final_nc = nc
+
+        if final_nc is None:
+            raise ValueError(
+                "无法确定类别数量。请通过以下方式之一指定：\n"
+                "  1. 在模型配置文件中设置 nc\n"
+                "  2. 提供 data_config 参数\n"
+                "  3. 直接指定 nc 参数"
+            )
+
+        # 从配置获取 scale
+        if 'model' in model_cfg and 'scale' in model_cfg['model']:
+            scale = model_cfg['model']['scale']
+        elif 'scale' in model_cfg:
+            scale = model_cfg['scale']
+
+        # 创建模型
+        from models.yolov11 import YOLOv11
+        self.model = YOLOv11(nc=final_nc, scale=scale)
+
+        # 设置设备
+        if device is None:
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
+
+        self.model = self.model.to(self.device)
+
+        # 保存配置信息
+        self._nc = final_nc
+        self.model_config = model_cfg
+
+        # 加载类别名称
+        if data_config:
+            self.names = self._load_names_from_yaml(data_config)
+            self.data_config = Path(data_config)
+        else:
+            self.names = {i: f"class_{i}" for i in range(final_nc)}
+            self.data_config = None
 
     def _load_names_from_yaml(self, yaml_path: Union[str, Path]) -> Dict[int, str]:
         """从 YAML 配置文件加载类别名称"""
@@ -184,6 +296,168 @@ class YOLO:
     def nc(self) -> int:
         """类别数量"""
         return self._nc
+
+    def train(
+        self,
+        data: Optional[Union[str, Path]] = None,
+        epochs: Optional[int] = None,
+        batch: Optional[int] = None,
+        imgsz: Optional[int] = None,
+        lr: Optional[float] = None,
+        device: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        save_dir: Optional[Union[str, Path]] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """训练模型
+
+        Args:
+            data: 数据集配置文件路径 (YAML)
+            epochs: 训练轮数
+            batch: 批次大小
+            imgsz: 图像尺寸
+            lr: 学习率
+            device: 设备 ('cpu', 'cuda', 'cuda:0', etc.)
+            config: 完整配置字典（如果提供，将忽略其他参数）
+            save_dir: 保存目录
+            **kwargs: 其他训练参数
+
+        Returns:
+            Dict[str, Any]: 训练结果，包含:
+                - best_map: 最佳 mAP50
+                - final_epoch: 最终轮数
+                - save_dir: 保存目录
+
+        Example:
+            >>> model = YOLO('configs/models/yolov11n.yaml')
+            >>> results = model.train(
+            ...     data='configs/data/coco8.yaml',
+            ...     epochs=100,
+            ...     batch=16,
+            ...     imgsz=640
+            ... )
+            >>> print(f"Best mAP: {results['best_map']}")
+        """
+        from models.yolov11 import YOLOv11
+
+        # 如果提供了完整配置，直接使用
+        if config is not None:
+            final_config = config
+            # 确保 data 配置正确
+            if data is not None and 'data' in final_config:
+                if isinstance(data, (str, Path)):
+                    final_config['data']['train'] = str(data)
+        else:
+            # 从参数构建配置
+            overrides = {}
+
+            # 将参数转换为嵌套配置
+            if epochs is not None:
+                overrides['train.epochs'] = epochs
+            if batch is not None:
+                overrides['train.batch_size'] = batch
+            if imgsz is not None:
+                overrides['train.img_size'] = imgsz
+            if device is not None:
+                overrides['device'] = device
+            if lr is not None:
+                overrides['optimizer.lr'] = lr
+            if save_dir is not None:
+                overrides['train.save_dir'] = str(save_dir)
+
+            # 添加其他 kwargs
+            for key, value in kwargs.items():
+                # 将下划线命名转换为点号命名
+                config_key = key.replace('__', '.').replace('_', '.')
+                overrides[config_key] = value
+
+            # 加载模型配置
+            if hasattr(self, 'model_config'):
+                model_config = self.model_config
+            else:
+                # 如果从权重加载，创建基础模型配置
+                model_config = {
+                    'model': {
+                        'nc': self.nc,
+                        'scale': getattr(self, 'scale', 'n')
+                    }
+                }
+
+            # 加载数据配置
+            data_config = {}
+            if data is not None:
+                data_path = Path(data)
+                if data_path.suffix in ['.yaml', '.yml']:
+                    # 从 YAML 文件加载数据配置
+                    data_yaml = load_yaml(str(data_path))
+
+                    # 构建数据配置
+                    data_config = {
+                        'data': {
+                            'train': str(data_path),
+                            'nc': data_yaml.get('nc', self.nc),
+                        }
+                    }
+
+                    # 更新模型的类别数量
+                    if 'nc' in data_yaml:
+                        new_nc = data_yaml['nc']
+                        if new_nc != self.nc:
+                            print(f"更新类别数量: {self.nc} -> {new_nc}")
+                            # 重新创建模型
+                            self.model = YOLOv11(nc=new_nc, scale=getattr(self, 'scale', 'n'))
+                            self.model.to(self.device)
+                            self._nc = new_nc
+
+                            # 更新类别名称
+                            if 'names' in data_yaml:
+                                names = data_yaml['names']
+                                if isinstance(names, dict):
+                                    self.names = {int(k): v for k, v in names.items()}
+                                elif isinstance(names, list):
+                                    self.names = {i: name for i, name in enumerate(names)}
+                else:
+                    data_config = {'data': {'train': str(data_path)}}
+
+            # 合并配置
+            final_config = merge_training_config(
+                model_config=model_config,
+                user_config=data_config,
+                overrides=overrides if overrides else None
+            )
+
+        # 确保 train.name 存在
+        if 'train' not in final_config:
+            final_config['train'] = {}
+        if 'name' not in final_config['train']:
+            final_config['train']['name'] = 'exp'
+
+        # 创建训练器并训练
+        trainer = DetectionTrainer(
+            model=self.model,
+            config=final_config,
+            save_dir=save_dir
+        )
+
+        results = trainer.train()
+
+        # 加载最佳权重回模型（状态同步）
+        best_weights_path = Path(results['save_dir']) / 'weights' / 'best.pt'
+        if best_weights_path.exists():
+            checkpoint = torch.load(
+                best_weights_path,
+                map_location=self.device,
+                weights_only=False
+            )
+            if isinstance(checkpoint, dict):
+                state_dict = checkpoint.get('model_state_dict', checkpoint)
+            else:
+                state_dict = checkpoint
+
+            self.model.load_state_dict(state_dict, strict=False)
+            print(f"已加载最佳权重到模型: {best_weights_path}")
+
+        return results
 
     def predict(
         self,
