@@ -11,7 +11,7 @@ def main():
     model = YOLO('configs/models/yolov11n.yaml')
 
     # 2. 开始训练
-    results = model.train(
+    model.train(
         data='datasets/MY_TEST_DATA/data.yaml',
         epochs=30,
         batch=8,
