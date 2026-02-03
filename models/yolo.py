@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Union, List, Optional, Tuple, Dict, Any
 from glob import glob
 
-# 从 engine.predict 导入预测所需的工具类和函数
-from engine.predict import (
+# 从 engine.predictor 导入预测所需的工具类和函数
+from engine.predictor import (
     LetterBox,
     _post_process,
     Results
@@ -784,7 +784,7 @@ class YOLO:
 
     def visualize_grid(
         self,
-        save_path: Union[str, Path] = "runs/predict/grid.jpg",
+        save_path: Union[str, Path] = None,
         num_samples: int = 9,
         conf: Optional[float] = None,
         iou: Optional[float] = None,

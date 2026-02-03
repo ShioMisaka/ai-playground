@@ -38,7 +38,7 @@ from .ema import ModelEMA
 
 # 预测接口（工具类）
 # 注意：YOLO 类应直接从 models.yolo 导入，避免循环导入
-from engine.predict import LetterBox, Results, Boxes
+from engine.predictor import LetterBox, Results, Boxes
 
 # 模型和训练信息输出
 from .model_summary import (

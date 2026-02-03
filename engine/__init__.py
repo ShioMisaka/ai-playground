@@ -7,14 +7,15 @@
 #   model = YOLO('configs/models/yolov11n.yaml')
 #   model.train(data='...', epochs=100)
 
-# 核心训练逻辑
-from .training import train_one_epoch, print_metrics
+# 核心训练逻辑 (now from trainer.py, previously training.py)
+from .trainer import train_one_epoch, print_metrics
 
 # 验证和测试
 from .validate import evaluate, test, validate
 
 # 预测接口（YOLO 类已移至 models/yolo.py）
-from .predict import LetterBox, Results, Boxes
+# Note: Renamed from predict.py to predictor.py for naming consistency
+from .predictor import LetterBox, Results, Boxes
 
 # 分类和检测专用训练
 from .classifier import (train_one_epoch as train_one_epoch_cls,

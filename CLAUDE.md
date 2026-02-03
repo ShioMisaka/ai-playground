@@ -337,29 +337,30 @@ results = model('image.jpg')
 **核心原则**：
 - 训练时：`YOLODataset` 使用 letterbox 预处理
 - 验证时：`YOLODataset` 使用 letterbox 预处理
-- 推理时：`Preprocessor` 使用相同的 letterbox 预处理
+- 推理时：`LetterBox` 使用相同的 letterbox 预处理
 
 ### 组件说明
 
-- **`Preprocessor`**: 统一的图像预处理类 (`engine/preprocessor.py`)
-  - 支持 letterbox 和简单 resize 两种模式
-  - 返回归一化后的张量和预处理参数字典（用于坐标映射）
+- **`LetterBox`**: 图像预处理类 (`engine/predictor.py`)
+  - Letterbox 预处理：保持长宽比的缩放 + 填充
 
-- **`Postprocessor`**: 统一的后处理类 (`engine/postprocessor.py`)
+- **`_post_process`**: 后处理函数 (`engine/predictor.py`)
   - NMS、置信度过滤
   - 坐标映射：从预处理空间映射回原图空间
 
-- **`BaseTask`**: 任务处理器基类 (`engine/base.py`)
-  - 提供统一的预处理和后处理功能
-  - 管理设备和模型
+- **`Results`**: 预测结果容器 (`engine/predictor.py`)
+  - Ultralytics 风格的结果对象
+  - 包含边界框、置信度、类别标签
+  - 支持 `plot()` 和 `save()` 方法
 
-- **`Predictor`**: 统一的推理器 (`engine/predictor_v2.py`)
-  - 对单张图像执行预测
-  - 返回 Results 对象
+- **`Boxes`**: 边界框容器 (`engine/predictor.py`)
+  - Ultralytics 风格的边界框对象
+  - 支持 `xyxy` 和 `xywh` 格式
 
 - **`YOLO`**: Ultralytics 风格的统一接口类 (`models/yolo.py`)
   - 支持从配置文件、权重文件或模型实例创建
   - 提供 `predict()` 方法进行推理
+  - 提供 `train()` 方法使用 `DetectionTrainer` 进行训练
 
 ### 配置文件
 

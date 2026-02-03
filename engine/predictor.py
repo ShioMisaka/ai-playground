@@ -9,6 +9,9 @@
 - ULTRALYTICS_COLORS: 专业调色板
 
 完整的 YOLO 预测接口位于 models/yolo.py。
+
+Note: This module was renamed from predict.py to predictor.py for naming
+consistency with trainer.py (both use -er suffix pattern).
 """
 import cv2
 import numpy as np
