@@ -36,10 +36,6 @@ from .table import (
 # EMA
 from .ema import ModelEMA
 
-# 预测接口（工具类）
-# 注意：YOLO 类应直接从 models.yolo 导入，避免循环导入
-from engine.predictor import LetterBox, Results, Boxes
-
 # 模型和训练信息输出
 from .model_summary import (
     print_training_info,
@@ -95,11 +91,6 @@ __all__ = [
 
     # EMA
     'ModelEMA',
-
-    # 预测接口（工具类）
-    'LetterBox',
-    'Results',
-    'Boxes',
 
     # 模型和训练信息
     'print_training_info',
