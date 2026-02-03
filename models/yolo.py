@@ -503,7 +503,6 @@ class YOLO:
                 state_dict = checkpoint
 
             self.model.load_state_dict(state_dict, strict=False)
-            print(f"已加载最佳权重到模型: {best_weights_path}")
 
         # 打印训练完成信息和绘制训练曲线
         from utils.model_summary import print_training_completion

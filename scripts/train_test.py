@@ -22,6 +22,3 @@ results = model.train(
     mosaic=False,  # 关闭 Mosaic 数据增强
     cfg_path='runs/config/test.yaml',
 )
-
-print(f"训练完成！Best mAP50: {results['best_map']:.4f}")
-print(f"模型保存位置: {results['save_dir']}")
