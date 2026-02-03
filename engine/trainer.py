@@ -171,15 +171,21 @@ class DetectionTrainer:
         enable_mosaic = self.train_cfg.get('mosaic', True)
         if not enable_mosaic:
             self.mosaic = None
-            self.mosaic_enabled = False
-            self.mosaic_prob = 0.0
             return
 
-        # Mosaic requires dataset access - will be set during data loading
-        # For now, create a placeholder that will be configured later
-        self.mosaic_enabled = enable_mosaic
-        self.mosaic_prob = self.train_cfg.get('mosaic_prob', 1.0)
-        self.mosaic = None  # Will be set after data loaders are created
+        # 获取配置参数
+        img_size = self.train_cfg.get('img_size', 640)
+        mosaic_prob = self.train_cfg.get('mosaic_prob', 1.0)
+
+        # 创建 MosaicTransform 并设置到训练集 dataset
+        # 注意：train_loader 必须已经在 _setup_data_loaders 中创建
+        self.mosaic = MosaicTransform(
+            dataset=self.train_loader.dataset,
+            img_size=img_size,
+            prob=mosaic_prob,
+            enable=True,
+        )
+        self.train_loader.dataset.transform = self.mosaic
 
     def _setup_logging(self):
         """Setup logging systems."""
@@ -226,7 +232,8 @@ class DetectionTrainer:
                 if mosaic_disable_epoch and epoch >= epochs - mosaic_disable_epoch:
                     if self.mosaic is not None:
                         self.mosaic.enable = False
-                        print_mosaic_disabled(epoch + 1)
+                    if epoch == epochs - mosaic_disable_epoch:
+                        print_mosaic_disabled(epoch)
 
                 # Training
                 train_metrics = train_one_epoch(
@@ -324,9 +331,7 @@ class DetectionTrainer:
         # Save best checkpoint
         if is_best:
             best_path = self.save_dir / 'weights' / 'best.pt'
-            torch.save(ckpt, best_path)
-            print(f"New best model saved with mAP50: {self.best_map:.4f}")
-
+            torch.save(ckpt, best_path) 
 
 # ============================================================================
 # Functions migrated from engine.training.py

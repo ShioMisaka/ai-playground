@@ -149,16 +149,11 @@ class MosaicTransform:
 
                     mosaic_boxes.append(new_boxes)
 
-        # 缩放回目标尺寸
-        mosaic_img = mosaic_img.resize((self.img_size, self.img_size), Image.BILINEAR)
-
-        # 关键修复：boxes 也需要相应缩放！
-        # 画布是 2*img_size，缩放到 img_size，所以坐标也要乘以 0.5
+        # 返回 Mosaic 图像和 boxes
+        # 注意：不在这里 resize 图像，让 YOLODataset 统一处理
+        # 这样 YOLODataset 可以正确检测 is_mosaic 并进行坐标变换
         if len(mosaic_boxes) > 0:
             mosaic_boxes = torch.cat(mosaic_boxes, dim=0)
-            # boxes 格式: [class_id, x_center, y_center, width, height]
-            # 只需要缩放坐标部分（索引 1-4），class_id 不变
-            mosaic_boxes[:, 1:] *= 0.5  # 所有坐标缩放 0.5
         else:
             mosaic_boxes = torch.zeros((0, 5), dtype=torch.float32)
 

@@ -109,9 +109,12 @@ class YOLODataset(Dataset):
                 # Mosaic 图像：从 2*img_size × 2*img_size resize 到 img_size × img_size
                 img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
-                # Boxes 坐标需要缩放 0.5（因为图像尺寸缩小了一半）
-                if len(boxes) > 0:
-                    boxes[:, 1:] *= 0.5  # 所有坐标缩放 0.5
+                # 注意：boxes 坐标不需要修改！
+                # Mosaic 返回的 boxes 是归一化坐标（相对于 2*img_size）
+                # 当图像 resize 后，归一化坐标仍然有效
+                # 因为归一化坐标表示的是相对位置，与图像尺寸无关
+                # 例如：0.25 表示在 1/4 位置，无论是 1280×1280 还是 640×640
+                # 修改后的错误：boxes *= 0.5 会导致坐标变成 0.125，完全错误
 
                 # Mosaic 不需要 letterbox 参数（没有填充偏移）
                 letterbox_params = None
