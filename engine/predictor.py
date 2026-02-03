@@ -329,6 +329,19 @@ class Results:
         return f"Results(shape={self.orig_shape}, {len(self.boxes)} detections)"
 
 
+def is_video_file(path: Union[str, Path]) -> bool:
+    """判断是否为视频文件
+
+    Args:
+        path: 文件路径
+
+    Returns:
+        是否为视频文件
+    """
+    video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv"}
+    return Path(path).suffix.lower() in video_extensions
+
+
 __all__ = [
     'LetterBox',
     '_scale_coords',
@@ -337,4 +350,5 @@ __all__ = [
     'Results',
     'ULTRALYTICS_COLORS',
     '_get_color',
+    'is_video_file',
 ]

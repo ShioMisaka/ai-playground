@@ -15,7 +15,10 @@ from .validate import evaluate, test, validate
 
 # 预测接口（YOLO 类已移至 models/yolo.py）
 # Note: Renamed from predict.py to predictor.py for naming consistency
-from .predictor import LetterBox, Results, Boxes
+from .predictor import LetterBox, Results, Boxes, is_video_file
+
+# 预测结果可视化
+from .visualizer import visualize_grid
 
 # 分类和检测专用训练
 from .classifier import (train_one_epoch as train_one_epoch_cls,
@@ -73,6 +76,10 @@ __all__ = [
     'LetterBox',
     'Results',
     'Boxes',
+    'is_video_file',
+
+    # 预测结果可视化
+    'visualize_grid',
 
     # 分类和检测专用
     'train_classifier',
