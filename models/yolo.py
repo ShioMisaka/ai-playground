@@ -503,6 +503,8 @@ class YOLO:
                 state_dict = checkpoint
 
             self.model.load_state_dict(state_dict, strict=False)
+            # 设置 weights_path 用于 visualize_grid 显示模型信息
+            self.weights_path = best_weights_path
 
         # 打印训练完成信息和绘制训练曲线
         from utils.model_summary import print_training_completion
@@ -513,8 +515,15 @@ class YOLO:
 
         # 只有在 CSV 文件实际存在时才打印和绘图（处理测试/模拟环境）
         if csv_path.exists():
-            print_training_completion(save_dir_path, csv_path, best_loss)
             plot_training_curves(str(csv_path), save_dir=str(save_dir_path))
+            print_training_completion(save_dir_path, csv_path, best_loss)
+
+            # 生成九宫格预测图像
+            grid_save_path = save_dir_path / 'predictions_grid.jpg'
+            try:
+                self.visualize_grid(save_path=grid_save_path, num_samples=9)
+            except Exception as e:
+                print(f"警告: 生成九宫格预测图像失败 ({e})")
 
         return results
 
