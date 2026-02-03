@@ -11,6 +11,16 @@
 - **Coordinate Attention (CoordAtt)** - 坐标注意力机制
 - **Coordinate Cross Attention (CoordCrossAtt)** - 坐标交叉注意力机制
 - **BiFPN** - 双向特征金字塔网络，支持多尺度特征融合
+- **统一 YOLO 接口** - Ultralytics 风格的训练和推理 API
+
+## 项目特色
+
+- **模块化设计**：清晰分离基础模块、完整模型和训练引擎
+- **配置驱动**：灵活的 YAML 配置系统，支持多层配置覆盖
+- **统一接口**：Ultralytics 风格的 YOLO 统一接口
+- **完整测试**：从单元测试到集成测试的完整测试体系
+- **丰富工具**：训练日志、曲线绘制、可视化等辅助工具
+- **预处理一致性**：训练、验证、推理使用相同的 letterbox 预处理
 
 ## 环境要求
 
@@ -61,41 +71,58 @@ python -m engine.train \
 
 ```python
 from models import YOLOv11
-from engine import train
-from utils.config import get_config
+from engine import DetectionTrainer
+from utils import get_config
 
-# 创建配置（使用嵌套键名）
+# 创建配置
 cfg = get_config(
     **{'train.name': 'exp001',
        'train.epochs': 100,
        'train.batch_size': 16,
-       'optimizer.lr': 0.001,
+       'data.name': 'coco8',
        'system.device': 'cuda'}
 )
 
 # 创建模型
 model = YOLOv11(nc=2, scale='s')
 
-# 开始训练
-train(model, cfg)
+# 创建训练器并训练
+trainer = DetectionTrainer(model, cfg)
+trainer.train()
+```
+
+#### 方式 4: 使用统一 YOLO 接口
+
+```python
+from models import YOLO
+
+# 从配置文件创建模型
+model = YOLO('configs/models/yolov11n.yaml')
+
+# 训练
+model.train(data='configs/data/coco8.yaml', epochs=100, batch=16)
+
+# 推理
+results = model.predict('image.jpg', conf=0.3, iou=0.5)
 ```
 
 ### 配置系统说明
 
 **配置优先级：**
 1. 默认配置 (`configs/default.yaml`)
-2. 模型配置 (`configs/models/*.yaml`)
-3. 用户配置（配置文件 OR CLI 参数）
+2. 数据集配置 (`configs/data/*.yaml`)
+3. 模型配置 (`configs/models/*.yaml`)
+4. 用户配置（配置文件 OR CLI 参数）
 
 **配置文件结构：**
 ```
 configs/
-├── default.yaml      # 全局默认配置
-├── models/           # 模型配置
-│   ├── yolov11n.yaml
-│   └── yolov11s.yaml
-└── experiments/      # 用户实验配置
-    └── my_exp.yaml
+├── data/                     # 数据集配置
+│   └── coco8.yaml
+├── default.yaml              # 全局默认配置
+└── models/                   # 模型配置
+    ├── yolov11n.yaml
+    └── yolov11s.yaml
 ```
 
 **CLI 参数：**
@@ -105,42 +132,9 @@ configs/
 - `--epochs`, `--batch-size`, `--lr`, `--device`: 快捷参数
 - `optimizer.lr=0.001`: 嵌套参数覆盖
 
-### 默认配置 (configs/default.yaml)
+### 训练输出示例
 
-```yaml
-train:
-  epochs: 100
-  batch_size: 16
-  name: null              # 必填项
-  save_dir: runs/train
-
-optimizer:
-  type: Adam
-  lr: 0.001
-  betas: [0.9, 0.999]
-  eps: 1.0e-08
-
-scheduler:
-  type: CosineAnnealingLR
-  min_lr: 1.0e-06
-
-model:
-  nc: 80                  # 默认类别数
-  scale: n                # 模型规模
-  img_size: 640
-  use_ema: true
-  ema_decay: 0.9999
-
-augment:
-  use_mosaic: true
-  close_mosaic: 10        # 最后 10 个 epoch 关闭 Mosaic
-
-system:
-  device: cuda
-  workers: 0
-```
-
-**训练输出（LiveTable 动态刷新）：**
+**LiveTable 动态刷新：**
 ```
 Epoch 1/100  lr=0.001000
            total_loss  box_loss  cls_loss  dfl_loss
@@ -149,124 +143,91 @@ Val   -       9.4208    2.2350    0.6850    0.1520  mAP50: 0.152  mAP50-95: 0.08
 Time: 38.59s
 ```
 
+**生成的文件：**
+| 文件 | 说明 |
+|------|------|
+| `training_log.csv` | 每个 epoch 的详细指标（YOLO 风格表头） |
+| `loss_analysis.png` | Loss 曲线（2x4 布局） |
+| `map_performance.png` | mAP@0.5 和 mAP@0.5:0.95 |
+| `precision_recall.png` | Precision 和 Recall |
+| `training_status.png` | 训练时间和学习率 |
+| `best.pt` | 最佳模型权重（基于 val loss） |
+| `last.pt` | 最后一个 epoch 的权重 |
+
 ### 绘制训练曲线
 
 ```bash
-# 使用脚本绘制（推荐）
+# 使用脚本绘制
 python scripts/plot_curves.py
 ```
 
-生成 4 张独立的 PNG 图片：
-- `loss_analysis.png` - Loss 曲线（2x4 布局）
-- `map_performance.png` - mAP@0.5 和 mAP@0.5:0.95
-- `precision_recall.png` - Precision 和 Recall
-- `training_status.png` - 训练时间和学习率
-
-所有曲线都带有黄色点状虚线平滑曲线（Savitzky-Golay 滤波）。
+生成 4 张独立的 PNG 图片，所有曲线都带有黄色点状虚线平滑曲线（Savitzky-Golay 滤波）。
 
 ### 运行测试
 
 ```bash
-# 测试 BiFPN 模块
-python tests/fpn_test.py
+# 运行所有测试
+pytest
 
-# 测试 Coordinate Attention 模块
-python tests/att_test.py
+# 运行特定测试
+pytest tests/att_test.py
+pytest tests/engine/test_trainer.py
+
+# 带覆盖率报告
+pytest --cov=modules --cov=models --cov=engine
 ```
-
-### 诊断工具
-
-```bash
-# 诊断训练问题（数据加载、标签、模型预测）
-python scripts/diagnose_training.py
-
-# 调试 TaskAlignedAssigner 和损失计算
-python scripts/debug_assigner.py
-```
-
-这些工具会生成：
-- 可视化图片（保存到 `outputs/diagnosis/`）
-- 详细的训练信息输出
-- IoU 分析和损失分量统计
-
-### 训练和可视化（传统方法）
-
-#### 1. 训练 YOLOv3
-
-```bash
-python demos/yolov3_demo.py
-```
-
-#### 2. 训练 YOLO + CoordAtt 检测器
-
-```bash
-python scripts/visualization/visualize_trained_coordatt.py
-```
-
-训练完成后会在 `outputs/yolo_coordatt_<timestamp>/` 生成：
-- `best_model.pth` - 最佳模型权重
-- `training_history.json` - 训练历史记录
-- `detection_attention.png` - 检测注意力可视化
-- `attention_comparison.png` - 训练前后注意力对比
-
-#### 3. 对比 CoordAtt vs CoordCrossAtt
-
-```bash
-python scripts/visualization/compare_attention_mechanisms.py
-```
-
-对比训练会在 `outputs/attention_comparison/run_<timestamp>/` 生成：
-- `coordatt/` 和 `crossatt/` - 两个模型的训练结果
-- `attention_comparison.png` - 注意力对比图
-- `cross_attention_matrix.png` - Cross-Attention 相关性矩阵
-- `training_progress.png` - 训练进度对比
 
 ## 项目结构
 
 ```
 ai-playground/
 ├── modules/                # 基础神经网络模块
-│   ├── att.py              # CoordAtt, CoordCrossAtt
-│   ├── bifpn.py            # BiFPN_Cat
-│   ├── conv.py             # Conv (Conv2d + BN + SiLU)
-│   ├── block.py            # C3k2, SPPF, C2PSA
-│   ├── head.py             # Detect, DetectAnchorFree
-│   └── yolo_loss.py        # YOLOLoss, YOLOLossAnchorFree
+│   ├── att.py              # 注意力机制 (CoordAtt, CoordCrossAtt, BiCoordCrossAtt)
+│   ├── bifpn.py            # 双向特征金字塔网络 (BiFPN_Cat)
+│   ├── block.py            # 基础块 (Bottleneck, C2f, C3, C3k2, SPPF, C2PSA)
+│   ├── conv.py             # 卷积模块 (Conv, Concat, autopad)
+│   ├── head.py             # 检测头 (Detect, DetectAnchorFree)
+│   └── yolo_loss.py        # YOLO 损失函数 (YOLOLoss, YOLOLossAnchorFree)
 │
 ├── models/                 # 完整模型
-│   ├── yolov11.py          # YOLOv11 (推荐)
-│   ├── yolov3.py           # YOLOv3
-│   └── yolo_att.py         # YOLOCoordAttDetector (legacy)
+│   ├── yolov11.py          # YOLOv11 模型（推荐）
+│   ├── yolov3.py           # YOLOv3 模型
+│   ├── yolo_att.py         # 带注意力机制的 YOLO（旧版）
+│   └── yolo.py             # Ultralytics 风格的统一 YOLO 接口
 │
 ├── engine/                 # 训练引擎核心
-│   ├── train.py            # train() 主训练流程
-│   ├── training.py         # train_one_epoch() 核心训练逻辑
-│   ├── validate.py         # validate() 验证与 mAP
-│   └── detector.py         # 检测器专用训练逻辑
+│   ├── train.py            # CLI 训练脚本
+│   ├── trainer.py          # DetectionTrainer 统一训练器
+│   ├── training.py         # train_one_epoch 核心训练逻辑
+│   ├── validate.py         # 验证与 mAP 计算
+│   ├── detector.py         # 检测器专用训练逻辑
+│   ├── classifier.py       # 分类器专用训练逻辑
+│   └── predictor.py        # 预测接口 (LetterBox, Results, Boxes)
 │
 ├── utils/                  # 工具模块
 │   ├── config.py           # 配置管理系统
-│   ├── load.py             # create_dataloaders()
-│   ├── logger.py           # TrainingLogger, LiveTableLogger
-│   ├── metrics.py          # compute_map50()
-│   ├── curves.py           # plot_training_curves()
-│   ├── path_helper.py      # get_save_dir() 自动递增目录
-│   ├── transforms.py       # MosaicTransform, MixupTransform
-│   ├── ema.py              # ModelEMA 指数移动平均
-│   └── model_summary.py    # print_model_summary()
+│   ├── load.py             # 数据加载
+│   ├── logger.py           # 训练日志 (TrainingLogger, LiveTableLogger)
+│   ├── metrics.py          # 评估指标
+│   ├── curves.py           # 训练曲线可视化
+│   ├── transforms.py       # 数据增强 (MosaicTransform, MixupTransform)
+│   └── ema.py              # 指数移动平均 (ModelEMA)
 │
 ├── configs/                # 配置文件
 │   ├── default.yaml        # 全局默认配置
-│   ├── models/             # 模型配置
-│   │   ├── yolov11n.yaml
-│   │   └── yolov11s.yaml
-│   └── experiments/        # 用户实验配置
+│   ├── data/               # 数据集配置
+│   └── models/             # 模型配置
 │
 ├── scripts/                # 脚本
 │   ├── plot_curves.py      # 训练曲线绘制脚本
 │   └── visualization/      # 可视化脚本
 │
 ├── tests/                  # 单元测试
+│   ├── utils/              # 工具模块测试
+│   ├── models/             # 模型测试
+│   ├── engine/             # 引擎测试
+│   └── integration/        # 集成测试
+│
 ├── demos/                  # 快速演示脚本
 ├── datasets/               # 数据集存储
 └── outputs/                # 输出结果
@@ -360,17 +321,6 @@ mosaic.enable = False
 - 增加样本多样性
 - 训练后期建议关闭（默认最后 10 个 epoch）
 
-### 自动递增保存目录
-
-保存目录会自动递增避免覆盖：
-
-```python
-from utils import get_save_dir
-
-save_dir = get_save_dir('runs/train/exp')
-# runs/train/exp -> runs/train/exp_1 -> runs/train/exp_2 ...
-```
-
 ### LiveTable 动态日志
 
 训练时使用动态刷新的表格显示进度：
@@ -388,6 +338,17 @@ live_logger.start_epoch(1, lr=0.001)
 live_logger.update_row("train", train_metrics)
 live_logger.update_row("val", val_metrics)
 live_logger.end_epoch(epoch_time)
+```
+
+### 自动递增保存目录
+
+保存目录会自动递增避免覆盖：
+
+```python
+from utils import get_save_dir
+
+save_dir = get_save_dir('runs/train/exp')
+# runs/train/exp -> runs/train/exp_1 -> runs/train/exp_2 ...
 ```
 
 ## 数据集格式
@@ -412,33 +373,11 @@ datasets/MY_TEST_DATA/
 path: /path/to/datasets/MY_TEST_DATA/
 train: images/train
 val: images/val
-test: images/test
 
 nc: 2  # 类别数
 names:
   0: circle
   1: square
-```
-
-## 训练输出
-
-训练过程会自动记录和保存：
-
-| 文件 | 说明 |
-|------|------|
-| `training_log.csv` | 每个 epoch 的详细指标（YOLO 风格表头） |
-| `loss_analysis.png` | Loss 曲线（2x4 布局） |
-| `map_performance.png` | mAP@0.5 和 mAP@0.5:0.95 |
-| `precision_recall.png` | Precision 和 Recall |
-| `training_status.png` | 训练时间和学习率 |
-| `best.pt` | 最佳模型权重（基于 val loss） |
-| `last.pt` | 最后一个 epoch 的权重 |
-
-**CSV 日志格式（YOLO 风格斜杠层级）：**
-```csv
-epoch,time,lr,train/loss,val/loss,train/box_loss,train/cls_loss,train/dfl_loss,val/box_loss,val/cls_loss,val/dfl_loss,metrics/precision(B),metrics/recall(B),metrics/mAP50(B),metrics/mAP50-95(B)
-1,38.59,0.001000,10.2023,9.4208,2.345,0.929,0.067,2.235,0.685,0.152,0.1234,0.0987,0.1523,0.0891
-2,41.29,0.000987,9.6480,8.9609,2.127,0.793,0.053,2.056,0.623,0.131,0.1456,0.1123,0.1823,0.1056
 ```
 
 ## 核心训练配置
@@ -483,8 +422,8 @@ epoch,time,lr,train/loss,val/loss,train/box_loss,train/cls_loss,train/dfl_loss,v
 如果 `box_loss` 长期高于 4.0：
 
 1. **检查学习率**：应为 0.001 或更低
-2. **验证数据加载**：运行 `python scripts/diagnose_training.py` 检查标签
-3. **分析初始预测**：运行 `python scripts/debug_assigner.py` 查看 IoU
+2. **验证数据加载**：检查标签格式是否正确
+3. **分析初始预测**：查看 IoU 分布
 4. **确认 reg_max=16**：更高的值（如 32）会显著增加收敛难度
 5. **验证 CIoU 已启用**：检查 `modules/yolo_loss.py` 中 `CIoU=True`
 6. **确认 beta=6.0**：TAL 的 beta 参数应为 6.0
@@ -522,16 +461,8 @@ epoch,time,lr,train/loss,val/loss,train/box_loss,train/cls_loss,train/dfl_loss,v
 | LiveTable 日志 | ✅ 完成 |
 | 训练曲线 | ✅ 完成 |
 | 自动递增目录 | ✅ 完成 |
-
-## 可视化效果
-
-训练后，模型学会关注形状的关键特征区域：
-
-- **检测注意力** - 显示模型在检测时关注的位置
-- **注意力对比** - 对比 CoordAtt 和 CoordCrossAtt 的注意力分布
-- **相关性矩阵** - 展示水平和垂直位置之间的关联
-- **训练曲线** - Loss、mAP、Precision、Recall、学习率变化趋势
-- **损失分量** - Box Loss、Cls Loss、DFL Loss 分别跟踪
+| 统一 YOLO 接口 | ✅ 完成 |
+| 配置管理系统 | ✅ 完成 |
 
 ## 许可证
 
